@@ -98,7 +98,7 @@ describe('GameSetupModal', () => {
 
   it('shows model alert when no available models', async () => {
     useGameStore.setState({
-      aiOpponents: [{ model_id: 'm1', name: 'AI', character: '' }],
+      aiOpponents: [{ model_id: 'm1', name: 'AI' }],
       availableModels: [],
     })
     render(<GameSetupModal open={true} onClose={vi.fn()} />)
@@ -112,7 +112,7 @@ describe('GameSetupModal', () => {
 
   it('opens model config panel when clicking 去配置 in alert', async () => {
     useGameStore.setState({
-      aiOpponents: [{ model_id: 'm1', name: 'AI', character: '' }],
+      aiOpponents: [{ model_id: 'm1', name: 'AI' }],
       availableModels: [],
     })
     render(<GameSetupModal open={true} onClose={vi.fn()} />)
@@ -134,8 +134,8 @@ describe('GameSetupModal', () => {
 
   it('navigates to game page on successful creation', async () => {
     useGameStore.setState({
-      aiOpponents: [{ model_id: 'm1', name: 'AI', character: '' }],
-      availableModels: [{ model_id: 'm1', display_name: 'Model 1', provider: 'test' }],
+      aiOpponents: [{ model_id: 'm1', name: 'AI' }],
+      availableModels: [{ id: 'm1', model: 'model-1', display_name: 'Model 1', provider: 'test' }],
       playerName: '玩家',
     })
 
@@ -157,8 +157,8 @@ describe('GameSetupModal', () => {
 
   it('shows error on creation failure', async () => {
     useGameStore.setState({
-      aiOpponents: [{ model_id: 'm1', name: 'AI', character: '' }],
-      availableModels: [{ model_id: 'm1', display_name: 'Model 1', provider: 'test' }],
+      aiOpponents: [{ model_id: 'm1', name: 'AI' }],
+      availableModels: [{ id: 'm1', model: 'model-1', display_name: 'Model 1', provider: 'test' }],
       playerName: '玩家',
     })
 
@@ -179,8 +179,8 @@ describe('GameSetupModal', () => {
 
   it('auto-fills player name when blank', async () => {
     useGameStore.setState({
-      aiOpponents: [{ model_id: 'm1', name: 'AI', character: '' }],
-      availableModels: [{ model_id: 'm1', display_name: 'Model 1', provider: 'test' }],
+      aiOpponents: [{ model_id: 'm1', name: 'AI' }],
+      availableModels: [{ id: 'm1', model: 'model-1', display_name: 'Model 1', provider: 'test' }],
       playerName: '  ',
     })
 

@@ -3,11 +3,11 @@
  *
  * 使用 vi.stubGlobal('fetch') 模拟 HTTP 请求。
  * 覆盖：
- * - 通用 request 行为（Content-Type / 错误处理）
+ * - 通用 request 行为（Content-Type / X-Provider-Keys / 错误处理）
  * - 游戏管理 API（createGame / getGameState / playerAction / getAvailableModels）
  * - 心路历程 API（getThoughts / getRoundNarrative / getGameSummary）
  * - 聊天 API（getChatHistory / getRoundChatHistory）
- * - Provider 管理（setProviderKey / verifyProviderKey / removeProviderKey）
+ * - Provider 管理（本地 key store / verifyProviderKey）
  * - Copilot API（connectCopilot / pollCopilotAuth / getCopilotStatus / disconnectCopilot）
  * - 模型管理（OpenRouter / SiliconFlow / Azure OpenAI — add / remove / fetch / getAdded）
  * - 设置 API（getSettings / updateSettings）
@@ -15,6 +15,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { useProviderKeysStore } from '../../stores/settingsStore'
 
 import {
   addAzureOpenAIModel,
@@ -46,10 +47,8 @@ import {
   pollCopilotAuth,
   removeAzureOpenAIModel,
   removeOpenRouterModel,
-  removeProviderKey,
   removeSiliconFlowModel,
   setProviderConfig,
-  setProviderKey,
   startGame,
   updateSettings,
   verifyProviderKey,
@@ -60,12 +59,15 @@ import {
 let fetchMock: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
+  useProviderKeysStore.setState({ keys: {} })
+  useProviderKeysStore.persist.clearStorage()
   fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 /** Helper: create a successful Response */
@@ -94,7 +96,7 @@ function errorResponse(status: number, detail?: string) {
 // ================================================================
 
 describe('request helper (via createGame)', () => {
-  it('sends Content-Type application/json', async () => {
+  it('sends Content-Type application/json without provider keys when none are stored', async () => {
     fetchMock.mockResolvedValue(
       okResponse({ game_id: 'g1', message: 'ok', players: [] }),
     )
@@ -109,6 +111,7 @@ describe('request helper (via createGame)', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     const [, opts] = fetchMock.mock.calls[0]
     expect(opts.headers['Content-Type']).toBe('application/json')
+    expect(opts.headers).not.toHaveProperty('X-Provider-Keys')
   })
 
   it('throws on non-ok response with detail', async () => {
@@ -308,30 +311,80 @@ describe('provider APIs', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/providers')
   })
 
-  it('setProviderKey POSTs key', async () => {
-    fetchMock.mockResolvedValue(
-      okResponse({ message: 'ok', provider: 'openrouter', configured: true }),
-    )
-    const res = await setProviderKey('openrouter', 'sk-xxx')
-    expect(res.configured).toBe(true)
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body)
-    expect(body.key).toBe('sk-xxx')
+  it('sends locally stored keys in X-Provider-Keys', async () => {
+    useProviderKeysStore.getState().setKey('openrouter', 'sk-test-openrouter')
+    useProviderKeysStore.getState().setKey('siliconflow', 'sk-test-siliconflow')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    fetchMock.mockResolvedValue(okResponse([]))
+    await getProviders()
+
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/providers', {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Provider-Keys': JSON.stringify({
+          openrouter: 'sk-test-openrouter',
+          siliconflow: 'sk-test-siliconflow',
+        }),
+      },
+    })
   })
 
-  it('verifyProviderKey POSTs', async () => {
+  it('verifyProviderKey POSTs an explicit key', async () => {
     fetchMock.mockResolvedValue(
       okResponse({ valid: true, message: 'ok' }),
     )
     const res = await verifyProviderKey('siliconflow', 'key')
     expect(res.valid).toBe(true)
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/providers/siliconflow/verify', {
+      method: 'POST',
+      body: JSON.stringify({ key: 'key' }),
+      headers: { 'Content-Type': 'application/json' },
+    })
   })
 
-  it('removeProviderKey DELETEs', async () => {
-    fetchMock.mockResolvedValue(
-      okResponse({ message: 'ok', provider: 'openrouter', configured: false }),
+  it('verifyProviderKey sends a stored key through the header when no key is supplied', async () => {
+    useProviderKeysStore.getState().setKey('siliconflow', 'sk-test-siliconflow')
+    fetchMock.mockResolvedValue(okResponse({ valid: true, message: 'ok' }))
+
+    const res = await verifyProviderKey('siliconflow')
+
+    expect(res.valid).toBe(true)
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith('/api/providers/siliconflow/verify', {
+      method: 'POST',
+      body: JSON.stringify({ key: null }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Provider-Keys': JSON.stringify({ siliconflow: 'sk-test-siliconflow' }),
+      },
+    })
+  })
+
+  it('removes local keys from subsequent request headers', async () => {
+    useProviderKeysStore.getState().setKey('openrouter', 'sk-test-openrouter')
+    useProviderKeysStore.getState().setKey('siliconflow', 'sk-test-siliconflow')
+    useProviderKeysStore.getState().removeKey('openrouter')
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    fetchMock.mockResolvedValue(okResponse([]))
+    await getProviders()
+    expect(fetchMock.mock.calls[0][1].headers['X-Provider-Keys']).toBe(
+      JSON.stringify({ siliconflow: 'sk-test-siliconflow' }),
     )
-    await removeProviderKey('openrouter')
-    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE')
+
+    useProviderKeysStore.getState().removeKey('siliconflow')
+    await getProviders()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1][1].headers).not.toHaveProperty('X-Provider-Keys')
+  })
+
+  it('omits X-Provider-Keys when stored keys are empty', async () => {
+    useProviderKeysStore.getState().setKey('openrouter', '')
+    fetchMock.mockResolvedValue(okResponse([]))
+
+    await getProviders()
+
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('X-Provider-Keys')
   })
 })
 

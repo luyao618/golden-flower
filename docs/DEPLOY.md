@@ -177,7 +177,7 @@ docker system prune -af
 
 ### Q: 前端构建报 TypeScript 类型错误
 
-Dockerfile 中使用 `npx vite build` 直接构建，跳过了 `tsc` 类型检查。测试文件中的类型错误不影响生产构建。
+Dockerfile 与 CI 均使用 `npm run build`，先执行 `tsc -b` 类型检查，再执行 `vite build`。类型检查包含测试文件；遇到类型错误时，请修复代码或过时的测试数据后重新构建。可在 `frontend/` 目录使用 Node.js 22 执行 `npm ci`、`npm test` 和 `npm run build` 复现检查。
 
 ### Q: Node.js 版本不兼容（需要 20.19+）
 
