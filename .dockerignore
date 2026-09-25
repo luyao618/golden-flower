@@ -1,0 +1,73 @@
+# Runtime secrets (Compose injects backend/.env via env_file).
+# Keep only the exact example filename, including in nested source directories.
+**/.env*
+!**/.env.example
+
+# Git metadata, including the .git file in isolated worktrees.
+**/.git
+
+# Host dependencies and generated build output (rebuilt inside Docker).
+**/.venv
+**/venv
+**/env
+**/ENV
+**/__pypackages__
+**/node_modules
+**/dist
+**/dist-ssr
+**/build
+**/*.egg-info
+**/*.egg
+**/*.tsbuildinfo
+
+# Python, Node and tool caches.
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.cache
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.hypothesis
+**/.tox
+**/.nox
+**/.npm
+**/.vite
+**/.parcel-cache
+**/.turbo
+
+# Test and coverage output.
+**/.coverage*
+**/coverage
+**/coverage.xml
+**/htmlcov
+**/lcov.info
+**/test-results
+**/playwright-report
+
+# Runtime logs, process files and local databases (including SQLite sidecars).
+**/logs
+**/.logs
+**/*.log
+**/*.log.*
+**/*.pid
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.sqlite3
+**/*.sqlite3-*
+
+# OS, editor and local workspace clutter.
+**/.DS_Store
+**/._*
+**/Thumbs.db
+**/Desktop.ini
+**/.idea
+**/.vscode
+**/.superset
+**/.herdr
+**/*.swp
+**/*.swo
+**/*~

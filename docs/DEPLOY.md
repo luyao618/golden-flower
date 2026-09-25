@@ -92,11 +92,13 @@ AZURE_OPENAI_API_KEY=your-key-here
 ZHIPU_API_KEY=your-key-here
 ```
 
-保存后重启生效：
+`backend/.env` 由 Compose 的 `env_file` 在创建容器时注入，不会进入 Docker 构建上下文或镜像。保存后重新创建后端容器，使新环境变量生效（无需重新构建镜像）：
 
 ```bash
-./deploy.sh --restart
+docker compose up -d --no-deps --force-recreate backend
 ```
+
+`./deploy.sh --restart` 只重启已有容器，不会重新加载环境变量文件。
 
 ### 5. 验证
 
