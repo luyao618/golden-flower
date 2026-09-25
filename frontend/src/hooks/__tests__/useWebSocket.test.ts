@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
-import { useWebSocket, type ConnectionStatus } from '../useWebSocket'
+import { useWebSocket } from '../useWebSocket'
 
 // ---- Mock WebSocket ----
 

@@ -11,7 +11,7 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
-RUN npx vite build
+RUN npm run build
 
 # ---- 阶段2: 后端运行环境 ----
 FROM python:3.11-slim
