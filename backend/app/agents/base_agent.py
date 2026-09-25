@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -238,8 +239,8 @@ class BaseAgent:
             )
 
         # ---- LiteLLM 路径 ----
-        # 设置 API keys（使用 agent 实例上的 keys，来自前端 localStorage）
-        _configure_api_keys(self._api_keys)
+        # 每次调用只解析所选 Provider 的 key，所有重试复用，避免污染进程环境。
+        api_key = _get_provider_api_key(provider, self._api_keys)
 
         # 为需要自定义 api_base 的 provider 获取端点
         api_base = _get_provider_api_base(provider)
@@ -271,6 +272,7 @@ class BaseAgent:
                 # 构建 LiteLLM 调用参数
                 call_kwargs = {
                     "model": model_name,
+                    "api_key": api_key,
                     "messages": messages,
                     "temperature": temp,
                     "response_format": fmt,
@@ -279,11 +281,6 @@ class BaseAgent:
                 }
                 if api_base:
                     call_kwargs["api_base"] = api_base
-                    # openai/ 前缀的 Provider 使用自定义 api_base 时，
-                    # LiteLLM 仍然读取 OPENAI_API_KEY，需要显式传入该 Provider 的 key
-                    api_key = _get_provider_api_key(provider, self._api_keys)
-                    if api_key:
-                        call_kwargs["api_key"] = api_key
 
                 response = await litellm.acompletion(**call_kwargs)
 
@@ -863,25 +860,6 @@ class LLMCallError(Exception):
 # ---- 辅助函数 ----
 
 
-def _configure_api_keys(api_keys: dict[str, str]) -> None:
-    """配置 LiteLLM 使用的 API keys
-
-    将前端传入的 provider keys 写入环境变量，
-    使 LiteLLM 能在调用时读取对应的 key。
-
-    Args:
-        api_keys: provider -> key 的字典（来自前端 localStorage）
-    """
-    import os
-
-    from app.services.provider_manager import PROVIDERS
-
-    for provider, meta in PROVIDERS.items():
-        key = api_keys.get(provider)
-        if key:
-            os.environ[meta["env_key"]] = key
-
-
 def _get_provider_api_base(provider: str) -> str | None:
     """获取需要自定义 api_base 的 Provider 的端点 URL
 
@@ -911,9 +889,8 @@ def _get_provider_api_base(provider: str) -> str | None:
 def _get_provider_api_key(provider: str, api_keys: dict[str, str]) -> str | None:
     """获取指定 Provider 的 API Key
 
-    用于 openai/ 前缀的 Provider（如智谱、SiliconFlow），
-    因为 LiteLLM 在使用 openai/ 前缀时默认读取 OPENAI_API_KEY，
-    需要通过 api_key 参数显式传入该 Provider 自己的 key。
+    优先使用当前 Agent 的 key，仅在缺失时读取该 Provider 的服务端环境变量。
+    不写入任何全局状态；未配置时保留 LiteLLM 自身的服务端凭据回退行为。
 
     Args:
         provider: Provider 标识
@@ -922,7 +899,15 @@ def _get_provider_api_key(provider: str, api_keys: dict[str, str]) -> str | None
     Returns:
         API Key 字符串，未配置时返回 None
     """
-    return api_keys.get(provider) or None
+    from app.services.provider_manager import PROVIDERS
+
+    key = api_keys.get(provider)
+    if key:
+        return key
+    meta = PROVIDERS.get(provider)
+    if meta:
+        return os.environ.get(meta["env_key"]) or None
+    return None
 
 
 # ---- 决策上下文格式化函数 ----
