@@ -12,6 +12,19 @@ import {
 const types = (events: ServerEvent[]) => events.map((event) => event.type)
 
 describe('backend-shaped replay fixtures', () => {
+  it('conserves all 6,000 chips throughout the six-seat start fixture', () => {
+    const replay = createStartReplay(5)
+    const total = replay.waiting.players.reduce((sum, player) => sum + player.chips, 0)
+    expect(total).toBe(6000)
+    expect(replay.humanTurn.players.reduce((sum, player) => sum + player.chips, 0)).toBe(5890)
+    expect(replay.humanTurn.current_round?.pot).toBe(110)
+    for (const snapshot of [replay.waiting, replay.dealt, replay.humanTurn,
+      ...replay.start.flatMap((event) => event.type === 'game_state' ? [event.data] : [])]) {
+      expect(snapshot.players.reduce((sum, player) => sum + player.chips, 0)
+        + (snapshot.current_round?.pot ?? 0)).toBe(total)
+    }
+  })
+
   it.each([1, 2, 3, 4, 5] as const)('creates and starts with %i AI opponents in server seat order', (count) => {
     const replay = createStartReplay(count)
     expect(replay.waiting.players).toHaveLength(count + 1)

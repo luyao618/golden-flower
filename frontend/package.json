@@ -13,7 +13,8 @@
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
     "test:e2e": "playwright test",
-    "test:e2e:headed": "playwright test --headed"
+    "test:e2e:headed": "playwright test --headed",
+    "test:shell": "playwright test --config playwright.shell.config.ts"
   },
   "dependencies": {
     "framer-motion": "^12.35.2",
