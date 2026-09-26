@@ -1,16 +1,16 @@
 import { defineConfig, devices } from '@playwright/test'
 
+// Each fixture owns an OS-reserved backend socket. No product UI or reused server.
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
-  timeout: 30000,
+  retries: 0,
+  workers: process.env.E2E_BACKEND_PORT ? 1 : 2,
+  reporter: [['list'], ['html', { open: 'never' }]],
+  timeout: 45000,
   use: {
-    baseURL: 'http://localhost:5173',
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   projects: [
@@ -18,19 +18,9 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-  ],
-  webServer: [
     {
-      command: 'cd ../backend && source .venv/bin/activate && uvicorn app.main:app --port 8000',
-      url: 'http://localhost:8000/health',
-      reuseExistingServer: !process.env.CI,
-      timeout: 30000,
-    },
-    {
-      command: 'npm run dev',
-      url: 'http://localhost:5173',
-      reuseExistingServer: !process.env.CI,
-      timeout: 15000,
+      name: 'mobile-chromium',
+      use: { ...devices['Pixel 7'] },
     },
   ],
 })

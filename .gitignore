@@ -39,3 +39,10 @@ backend/logs/
 
 # Node (frontend)
 node_modules/
+
+# Worktree-local dependency caches and browser test artifacts
+.uv-cache/
+.npm-cache/
+.playwright-browsers/
+frontend/playwright-report/
+frontend/test-results/
