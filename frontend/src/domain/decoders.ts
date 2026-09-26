@@ -9,6 +9,11 @@ import type {
   NarrativeDTO, ReviewListDTO, SettingsDTO, SummaryDTO, SummaryStatsDTO,
   ThoughtListDTO, ThoughtRecordDTO,
 } from './rest'
+import type {
+  AddedModelDTO, CopilotConnectDTO, CopilotModelDTO, CopilotPollDTO, CopilotStatusDTO,
+  KeyProvider, MessageDTO, ProviderConfigDTO, ProviderConfigResponseDTO, ProviderStatusDTO,
+  RemovedModelDTO, VerifyKeyDTO,
+} from './providers'
 
 type Guard<T> = (value: unknown) => value is T
 export type DecodeResult<T> = { ok: true, value: T } | { ok: false }
@@ -196,4 +201,40 @@ export const decodeModels = decoder(array(object<ModelDTO>({
 export const decodeModelCatalog = decoder(object<ModelCatalogDTO>({
   models: array(object({ id: string, name: string, context_length: nullable(integer),
     pricing: object({ prompt: string, completion: string }) })), total: integer,
+}))
+
+export const decodeAddedModels = decoder(object<{ models: ModelDTO[] }>({
+  models: (v): v is ModelDTO[] => decodeModels(v).ok,
+}))
+const providerConfig = object<ProviderConfigDTO>({ api_host: optional(string), api_version: optional(string) })
+export const decodeProviders = decoder(array(object<ProviderStatusDTO>({
+  provider: string, name: string, configured: boolean, key_preview: nullable(string),
+  extra_config: optional(providerConfig),
+})))
+export const decodeVerifyKey = decoder(object<VerifyKeyDTO>({ valid: boolean, message: string }))
+export const decodeProviderConfig = decoder(object<ProviderConfigResponseDTO>({
+  message: string, provider: string, extra_config: providerConfig,
+}))
+export const decodeMessage = decoder(object<MessageDTO>({ message: string }))
+export const decodeRemovedModel = decoder(object<RemovedModelDTO>({ message: string, model_id: string }))
+const addedModelBase = object({ message: string, model_id: string, display_name: string })
+const originalIds = { openrouter: 'openrouter_id', siliconflow: 'siliconflow_id',
+  azure_openai: 'azure_id', zhipu: 'zhipu_id' } as const
+export function decodeAddedModel<P extends KeyProvider>(provider: P, value: unknown): DecodeResult<AddedModelDTO<P>> {
+  const guard = (v: unknown): v is AddedModelDTO<P> =>
+    record(v) && Object.hasOwn(v, originalIds[provider]) && string(v[originalIds[provider]]) && addedModelBase(v)
+  return decoder(guard)(value)
+}
+export const decodeCancelledSummaries = decoder(object<{ game_id: string, cancelled: number }>({
+  game_id: string, cancelled: integer,
+}))
+const copilotModels = array(object<CopilotModelDTO>({ id: string, model: string, display_name: string }))
+export const decodeCopilotConnect = decoder(object<CopilotConnectDTO>({
+  user_code: string, verification_uri: string, expires_in: integer,
+}))
+const copilotPending = object({ status: oneOf('pending'), slow_down: optional(boolean), interval: optional(integer) })
+const copilotConnected = object({ status: oneOf('connected'), models: copilotModels })
+export const decodeCopilotPoll = decoder((v: unknown): v is CopilotPollDTO => copilotPending(v) || copilotConnected(v))
+export const decodeCopilotStatus = decoder(object<CopilotStatusDTO>({
+  connected: boolean, has_valid_token: boolean, models: copilotModels,
 }))
