@@ -1,0 +1,25 @@
+# Package 2A contract fixtures
+
+Run from `frontend/`: `npm test -- src/domain/__tests__`.
+
+These synthetic fixtures use fixed identities, cards, timestamps and explicit balances. Factories return fresh data; event snapshots are independent copies. They are not production captures, a game engine, or a runtime replay controller. No legacy entry imports the new modules.
+
+Wire sources: `backend/app/models/game.py`, `models/card.py`, `api/game.py`, `api/websocket.py`, `api/thought.py`, `api/chat.py`, `api/settings.py`, `config.py`, and the model catalog endpoints. Sequence reference: `docs/WEB_GAME_REBUILD.md` §4. The contract layer validates JSON structure and finite numbers without coercion, defaults, rendering, or game-rule enforcement. Required nullable response fields must be present; optional original-model metadata may be absent. Extra object fields are accepted, not stripped. Dictionaries reject the exact own keys `__proto__`, `constructor`, and `prototype` before consumers copy or merge them; other opaque player IDs remain unchanged. A valid DTO is not a public presentation model or a privacy/security filter.
+
+| Fixture | Coverage / source |
+| --- | --- |
+| `createStartReplay(1..5)` | REST create/viewer read/alternative REST start; WS connect then `round_started → game_state → cards_dealt`; AI call loops then human `turn_changed`. Matches `_handle_start_round`, `process_ai_turns`, and `get_visible_state`. |
+| `createHandReplay()` | Free unrecorded WS peek; human seen call, AI blind raise, fallback fold, participant compare. Final `player_acted → settled game_state → round_ended → game_state` matches `_broadcast_action_result` and `_handle_round_end`. Chips are already 1060/960/980 in both snapshots; +60/−40/−20 are net since the hand began. |
+| `nextHand`, `reconnect`, `offTurnPeek` | Rotated dealer and new antes; connect only supplies snapshot plus human turn when applicable; an off-turn peek has no turn notification. A receive-loop delay may postpone actual off-turn processing. Next-hand sequence deliberately stops at AI thinking. |
+| `duplicateDelivery` | Explicit fault injection: repeated result/snapshot after normal settlement, for later reducer tests. This is not an extra normal backend emission. |
+| `createCompareReplay(viewer)` | AI-vs-AI comparison fragment after human call/AI peek: participant gets cards/descriptions, spectator gets four nulls; two active players remain and play continues. Normal snapshots do not restore missed private compare cards. |
+| `createShowdownReplay()` | Supplied `hands_revealed` only for surviving hands; ordinary player hands remain viewer-filtered. Turn counter is **manually seeded** because backend defect B01 blocks natural turn-limit progression. |
+| `createFinishedReplay()` | Both players ante their last chips, AI folds; final snapshot/result/snapshot then `game_ended`, whose payload has standings only. |
+| `protocolCases` | Dormant `game_started`/`ai_reviewing`, errors, null cards, unknown type, malformed JSON/envelope/payload. Unknown and invalid diagnostics do not retain raw input. |
+| `createReadFixtures()` | Nullable journal/narrative/review/summary data, nested stats, raw text, nullable catalog length, all provider metadata. The Copilot registry provider is `github_copilot`, independent of the `copilot-` model ID prefix. Model IDs deliberately include opaque characters; never infer IDs from labels. Archive/live chat IDs and timestamps differ; repeated text is valid. |
+
+The REST start/action responses are **alternative endpoint examples**, not additional requests to send during the WS replay. The explicit `/end` response belongs to the still-playing settlement boundary in `createHandReplay().rest`; calling `/end` after natural finish is rejected. Live chat has no authoritative round number. Optional summaries/reviews are historical reader examples, not claims that disabled generators run.
+
+Own cards arrive even while blind; DTO availability does not authorize showing faces. Spectator compare fixtures contain no private compare faces. DOM/accessibility privacy and no-double-payout reducer behavior remain later packages; these tests prove wire facts and order, not those runtime behaviors. No paid providers, live backend, browser, UI, HTTP adapter, socket controller, or business-rule change is involved.
+
+Verification (2026-09-26): `npm ci --no-audit --no-fund` succeeded without dependency changes; focused Vitest tests passed (4 files / 76 tests), full `npm test` passed (14 files / 268 tests), and `npm run build` passed with the existing >500 kB chunk warning. The 26 dictionary regression tests cover JSON-parsed dangerous keys on all four dictionary paths, nested REST/WS envelopes, empty records and ordinary opaque IDs. The Copilot model regression asserts the registry's `github_copilot` provider and preserves it through decoding. `npx eslint src/domain src/test/fixtures` passed. Global `npm run lint` still reports the documented 32 errors and 1 warning, all in untouched legacy files. Working-tree and staged `git diff --check` passed. No backend/browser integration claim is made.
