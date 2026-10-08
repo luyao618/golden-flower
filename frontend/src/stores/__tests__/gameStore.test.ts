@@ -20,6 +20,7 @@ import {
   useGameStore,
 } from '../gameStore'
 import { useUIStore } from '../uiStore'
+import { useSessionStore } from '../sessionStore'
 
 // ---- Mock API ----
 
@@ -217,7 +218,7 @@ describe('useGameStore', () => {
       expect(resp.game_id).toBe('g1')
       expect(useGameStore.getState().gameId).toBe('g1')
       expect(useGameStore.getState().myPlayerId).toBe('p1')
-      expect(useGameStore.getState().status).toBe('playing')
+      expect(useGameStore.getState().status).toBe('waiting')
     })
 
     it('reverts to idle on failure', async () => {
@@ -397,4 +398,34 @@ describe('useGameStore', () => {
       expect(s.aiOpponents).toHaveLength(3)
     })
   })
+})
+
+
+describe('created session identity', () => {
+  beforeEach(() => {
+    resetStores()
+    useSessionStore.setState({ sessions: {} })
+  })
+
+  it('remembers the returned human identity only after a successful create', async () => {
+    mockCreateGame.mockResolvedValue({ game_id: 'server-game', players: [
+      { id: 'server-human', player_type: 'human' },
+    ] })
+    await useGameStore.getState().createGame()
+    expect(useSessionStore.getState().sessions['server-game']).toEqual({ playerId: 'server-human' })
+  })
+
+  it('rejects responses without a human instead of making them navigable', async () => {
+    mockCreateGame.mockResolvedValue({ game_id: 'bad-game', players: [] })
+    await expect(useGameStore.getState().createGame()).rejects.toThrow('人类玩家')
+    expect(useSessionStore.getState().sessions).toEqual({})
+    expect(useGameStore.getState().gameId).toBeNull()
+    expect(useGameStore.getState().status).toBe('idle')
+  })
+})
+
+it('preserves a waiting snapshot instead of claiming play has started', () => {
+  useGameStore.getState().setGameState({ game_id: 'waiting-game', status: 'waiting', players: [], current_round: null,
+    round_history: [], config: { initial_chips: 500, ante: 10, max_bet: 200, max_turns: 10 } })
+  expect(useGameStore.getState().status).toBe('waiting')
 })

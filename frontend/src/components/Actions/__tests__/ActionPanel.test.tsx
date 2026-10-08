@@ -414,3 +414,28 @@ describe('ActionPanel', () => {
     expect(screen.getByText('弃牌')).toBeTruthy()
   })
 })
+
+it('keeps compare selection when transport rejects the send', () => {
+  setupStore({ myPlayer: makePlayer({ status: 'active_seen' }), availableActions: ['compare'], players: [
+    makePlayer({ status: 'active_seen' }), makePlayer({ id: 'bot', name: 'Bot', player_type: 'ai' }),
+  ] })
+  const send = vi.fn(() => false)
+  render(<ActionPanel onAction={send} />)
+  fireEvent.click(screen.getByText('比牌'))
+  fireEvent.click(screen.getByTestId('compare-target-bot'))
+  expect(screen.getByTestId('compare-selector')).toBeInTheDocument()
+  expect(useUIStore.getState().compareTargetId).toBe('bot')
+  expect(send).toHaveBeenCalledWith('compare', 'bot')
+})
+
+it('disables betting and fold confirmation on lost connection', () => {
+  setupStore({ availableActions: ['call', 'fold'] })
+  const send = vi.fn()
+  const { rerender } = render(<ActionPanel onAction={send} />)
+  fireEvent.click(screen.getByText('弃牌'))
+  rerender(<ActionPanel onAction={send} disabled />)
+  expect(screen.getByRole('button', { name: '确认弃牌' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: /跟注/ })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: '确认弃牌' }))
+  expect(send).not.toHaveBeenCalled()
+})

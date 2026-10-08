@@ -81,7 +81,7 @@ function lastWs(): MockWebSocket {
   return MockWebSocket.instances[MockWebSocket.instances.length - 1]
 }
 
-function makeConfig(overrides = {}) {
+function makeConfig(overrides: Partial<NonNullable<Parameters<typeof useWebSocket>[0]>> = {}) {
   return {
     gameId: 'g1',
     playerId: 'p1',
@@ -121,6 +121,96 @@ describe('useWebSocket', () => {
     expect(onConnected).toHaveBeenCalledOnce()
   })
 
+  describe('obsolete connections', () => {
+    const callbacks = [
+      { name: 'open', fire: (ws: MockWebSocket) => ws.simulateOpen() },
+      { name: 'message', fire: (ws: MockWebSocket) => ws.simulateMessage({ type: 'game_state', data: { game_id: 'g1' } }) },
+      { name: 'error', fire: (ws: MockWebSocket) => ws.simulateError() },
+      { name: 'close', fire: (ws: MockWebSocket) => ws.simulateClose() },
+    ]
+
+    it.each(callbacks)('ignores stale $name callbacks after changing games', ({ fire }) => {
+      const config = makeConfig({
+        onConnected: vi.fn(),
+        onDisconnected: vi.fn(),
+        onError: vi.fn(),
+      })
+      const { result, rerender } = renderHook((currentConfig) => useWebSocket(currentConfig), {
+        initialProps: config,
+      })
+      const oldWs = lastWs()
+      rerender({ ...config, gameId: 'g2' })
+      const currentWs = lastWs()
+
+      act(() => fire(oldWs))
+      act(() => vi.advanceTimersByTime(5000))
+
+      expect(result.current.status).toBe('connecting')
+      expect(lastWs()).toBe(currentWs)
+      expect(currentWs.closed).toBe(false)
+      expect(config.onMessage).not.toHaveBeenCalled()
+      expect(config.onConnected).not.toHaveBeenCalled()
+      expect(config.onDisconnected).not.toHaveBeenCalled()
+      expect(config.onError).not.toHaveBeenCalled()
+    })
+
+    it.each(callbacks)('ignores late $name callbacks after unmount', ({ fire }) => {
+      const config = makeConfig({
+        onConnected: vi.fn(),
+        onDisconnected: vi.fn(),
+        onError: vi.fn(),
+      })
+      const { unmount } = renderHook(() => useWebSocket(config))
+      const ws = lastWs()
+      unmount()
+
+      act(() => fire(ws))
+      act(() => vi.advanceTimersByTime(5000))
+
+      expect(MockWebSocket.instances).toHaveLength(1)
+      expect(config.onMessage).not.toHaveBeenCalled()
+      expect(config.onConnected).not.toHaveBeenCalled()
+      expect(config.onDisconnected).not.toHaveBeenCalled()
+      expect(config.onError).not.toHaveBeenCalled()
+    })
+
+    it('disconnects when the configuration is removed', () => {
+      const config = makeConfig()
+      const { result, rerender } = renderHook((currentConfig) => useWebSocket(currentConfig), {
+        initialProps: config as Parameters<typeof useWebSocket>[0],
+      })
+      act(() => lastWs().simulateOpen())
+      const ws = lastWs()
+
+      rerender(null)
+      act(() => ws.simulateMessage({ type: 'game_state', data: { game_id: 'g1' } }))
+
+      expect(result.current.status).toBe('disconnected')
+      expect(ws.closed).toBe(true)
+      expect(result.current.sendStartRound()).toBe(false)
+      expect(config.onMessage).not.toHaveBeenCalled()
+    })
+
+    it('starts a new retry budget when changing games', () => {
+      const config = makeConfig({ maxReconnectAttempts: 1 })
+      const { result, rerender } = renderHook((currentConfig) => useWebSocket(currentConfig), {
+        initialProps: config,
+      })
+      act(() => lastWs().simulateClose())
+      act(() => vi.advanceTimersByTime(1000))
+      act(() => lastWs().simulateClose())
+      expect(result.current.status).toBe('disconnected')
+
+      rerender({ ...config, gameId: 'g2' })
+      act(() => lastWs().simulateClose())
+
+      expect(result.current.status).toBe('reconnecting')
+      act(() => vi.advanceTimersByTime(1000))
+      expect(MockWebSocket.instances).toHaveLength(4)
+      expect(lastWs().url).toContain('/ws/g2?')
+    })
+  })
+
   // ---- Message handling ----
 
   it('dispatches parsed messages to onMessage', () => {
@@ -142,12 +232,52 @@ describe('useWebSocket', () => {
   // ---- Send methods ----
 
   describe('send methods', () => {
+    const sendCases = [
+      { name: 'sendAction', send: (socket: ReturnType<typeof useWebSocket>) => socket.sendAction('call') },
+      { name: 'sendChatMessage', send: (socket: ReturnType<typeof useWebSocket>) => socket.sendChatMessage('hello') },
+      { name: 'sendStartRound', send: (socket: ReturnType<typeof useWebSocket>) => socket.sendStartRound() },
+    ]
+
+    it.each(sendCases)('$name returns true after an open socket accepts the send', ({ send }) => {
+      const { result } = renderHook(() => useWebSocket(makeConfig()))
+      act(() => lastWs().simulateOpen())
+
+      expect(send(result.current)).toBe(true)
+      expect(lastWs().sent).toHaveLength(1)
+    })
+
+    it.each(sendCases)('$name returns false without a socket', ({ send }) => {
+      const { result } = renderHook(() => useWebSocket(null))
+
+      expect(send(result.current)).toBe(false)
+    })
+
+    it.each(sendCases)('$name returns false when the socket is closing', ({ send }) => {
+      const { result } = renderHook(() => useWebSocket(makeConfig()))
+      act(() => lastWs().simulateOpen())
+      lastWs().readyState = MockWebSocket.CLOSING
+
+      expect(send(result.current)).toBe(false)
+      expect(lastWs().sent).toHaveLength(0)
+    })
+
+    it.each(sendCases)('$name returns false when send throws', ({ send }) => {
+      const { result } = renderHook(() => useWebSocket(makeConfig()))
+      act(() => lastWs().simulateOpen())
+      vi.spyOn(lastWs(), 'send').mockImplementation(() => {
+        throw new DOMException('The socket closed before send', 'InvalidStateError')
+      })
+
+      expect(send(result.current)).toBe(false)
+      expect(lastWs().sent).toHaveLength(0)
+    })
+
     it('sendAction sends player_action event', () => {
       const config = makeConfig()
       const { result } = renderHook(() => useWebSocket(config))
       act(() => lastWs().simulateOpen())
 
-      act(() => result.current.sendAction('call'))
+      act(() => { result.current.sendAction('call') })
 
       const sent = JSON.parse(lastWs().sent[0])
       expect(sent.type).toBe('player_action')
@@ -159,7 +289,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket(config))
       act(() => lastWs().simulateOpen())
 
-      act(() => result.current.sendAction('compare', 'p2'))
+      act(() => { result.current.sendAction('compare', 'p2') })
 
       const sent = JSON.parse(lastWs().sent[0])
       expect(sent.data.target).toBe('p2')
@@ -170,7 +300,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket(config))
       act(() => lastWs().simulateOpen())
 
-      act(() => result.current.sendChatMessage('hello'))
+      act(() => { result.current.sendChatMessage('hello') })
 
       const sent = JSON.parse(lastWs().sent[0])
       expect(sent.type).toBe('chat_message')
@@ -182,7 +312,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket(config))
       act(() => lastWs().simulateOpen())
 
-      act(() => result.current.sendStartRound())
+      act(() => { result.current.sendStartRound() })
 
       const sent = JSON.parse(lastWs().sent[0])
       expect(sent.type).toBe('start_round')
@@ -193,7 +323,7 @@ describe('useWebSocket', () => {
       const { result } = renderHook(() => useWebSocket(config))
       // Don't call simulateOpen — status is 'connecting'
 
-      act(() => result.current.sendAction('fold'))
+      act(() => { result.current.sendAction('fold') })
 
       expect(lastWs().sent).toHaveLength(0)
     })
@@ -269,6 +399,22 @@ describe('useWebSocket', () => {
     expect(onError).toHaveBeenCalledWith(expect.stringContaining('重连失败'))
   })
 
+  it.each([4001, 4003, 4004])('does not automatically retry terminal close %s', (code) => {
+    const onDisconnected = vi.fn()
+    const { result } = renderHook(() => useWebSocket(makeConfig({ onDisconnected })))
+    act(() => lastWs().simulateClose(code))
+
+    expect(result.current.status).toBe('disconnected')
+    expect(onDisconnected).toHaveBeenCalledOnce()
+    act(() => vi.advanceTimersByTime(60000))
+    expect(MockWebSocket.instances).toHaveLength(1)
+
+    act(() => result.current.reconnect())
+    expect(MockWebSocket.instances).toHaveLength(2)
+    act(() => lastWs().simulateOpen())
+    expect(result.current.status).toBe('connected')
+  })
+
   // ---- Reconnect method ----
 
   it('reconnect resets attempts and connects', () => {
@@ -282,5 +428,20 @@ describe('useWebSocket', () => {
     act(() => result.current.reconnect())
 
     expect(MockWebSocket.instances.length).toBeGreaterThan(countBefore)
+  })
+
+  it('explicit reconnect cancels a pending automatic retry', () => {
+    const { result } = renderHook(() => useWebSocket(makeConfig()))
+    act(() => lastWs().simulateClose())
+    expect(result.current.status).toBe('reconnecting')
+
+    act(() => result.current.reconnect())
+    const currentWs = lastWs()
+    act(() => vi.advanceTimersByTime(5000))
+
+    expect(MockWebSocket.instances).toHaveLength(2)
+    expect(lastWs()).toBe(currentWs)
+    expect(currentWs.closed).toBe(false)
+    expect(result.current.status).toBe('connecting')
   })
 })

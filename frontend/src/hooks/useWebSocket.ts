@@ -43,11 +43,11 @@ interface UseWebSocketReturn {
   /** 当前连接状态 */
   status: ConnectionStatus
   /** 发送玩家操作 */
-  sendAction: (action: GameAction, target?: string) => void
+  sendAction: (action: GameAction, target?: string) => boolean
   /** 发送聊天消息 */
-  sendChatMessage: (content: string) => void
+  sendChatMessage: (content: string) => boolean
   /** 发送开始新局 */
-  sendStartRound: () => void
+  sendStartRound: () => boolean
   /** 手动断开连接 */
   disconnect: () => void
   /** 手动重连 */
@@ -60,6 +60,8 @@ interface UseWebSocketReturn {
 const BASE_RECONNECT_DELAY = 1000
 /** 最大重连延迟（毫秒） */
 const MAX_RECONNECT_DELAY = 30000
+/** 会话无效、权限不足或游戏不存在时，不自动重试 */
+const TERMINAL_CLOSE_CODES = new Set([4001, 4003, 4004])
 
 /**
  * 构建 WebSocket URL
@@ -118,12 +120,14 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
   // ---- Internal: connect ----
   const connect = useCallback(() => {
     if (!gameId || !playerId) return
+    clearReconnectTimer()
 
     // Close existing connection if any
     if (wsRef.current) {
       intentionalClose.current = true
-      wsRef.current.close()
+      const previousWs = wsRef.current
       wsRef.current = null
+      previousWs.close()
     }
 
     const url = buildWsUrl(gameId, playerId)
@@ -134,6 +138,7 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
     wsRef.current = ws
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return
       setStatus('connected')
       reconnectAttempts.current = 0
       clearReconnectTimer()
@@ -141,6 +146,7 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
     }
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return
       try {
         const data = JSON.parse(event.data) as ServerEvent
         onMessageRef.current?.(data)
@@ -150,23 +156,16 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
     }
 
     ws.onerror = (event) => {
+      if (wsRef.current !== ws) return
       console.error('[WebSocket] Error:', event)
       onErrorRef.current?.('WebSocket 连接错误')
     }
 
     ws.onclose = (event) => {
-      // Only clear wsRef if this is still the current WebSocket.
-      // In React StrictMode, a newer WebSocket may already have been
-      // created before this onclose fires for the old one.
-      if (wsRef.current === ws) {
-        wsRef.current = null
-      } else {
-        // This onclose is for a stale WebSocket — ignore it entirely
-        console.log('[WebSocket] Ignoring onclose for stale WebSocket instance')
-        return
-      }
+      if (wsRef.current !== ws) return
+      wsRef.current = null
 
-      if (intentionalClose.current) {
+      if (intentionalClose.current || TERMINAL_CLOSE_CODES.has(event.code)) {
         setStatus('disconnected')
         onDisconnectedRef.current?.()
         return
@@ -198,20 +197,21 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
 
   // ---- Send helpers ----
 
-  const sendRaw = useCallback((event: ClientEvent) => {
+  const sendRaw = useCallback((event: ClientEvent): boolean => {
     const ws = wsRef.current
-    console.log('[WebSocket] sendRaw called:', event.type, 'ws:', ws ? `readyState=${ws.readyState}` : 'null')
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false
+
+    try {
       ws.send(JSON.stringify(event))
-      console.log('[WebSocket] Message sent successfully')
-    } else {
-      console.warn('[WebSocket] Cannot send, not connected')
+      return true
+    } catch {
+      return false
     }
   }, [])
 
   const sendAction = useCallback(
     (action: GameAction, target?: string) => {
-      sendRaw({
+      return sendRaw({
         type: 'player_action',
         data: { action, ...(target ? { target } : {}) },
       })
@@ -221,7 +221,7 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
 
   const sendChatMessage = useCallback(
     (content: string) => {
-      sendRaw({
+      return sendRaw({
         type: 'chat_message',
         data: { content },
       })
@@ -230,8 +230,7 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
   )
 
   const sendStartRound = useCallback(() => {
-    console.log('[WebSocket] sendStartRound called, ws readyState:', wsRef.current?.readyState)
-    sendRaw({ type: 'start_round' })
+    return sendRaw({ type: 'start_round' })
   }, [sendRaw])
 
   // ---- Disconnect ----
@@ -241,8 +240,9 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
     clearReconnectTimer()
     reconnectAttempts.current = 0
     if (wsRef.current) {
-      wsRef.current.close()
+      const currentWs = wsRef.current
       wsRef.current = null
+      currentWs.close()
     }
     setStatus('disconnected')
   }, [clearReconnectTimer])
@@ -257,23 +257,20 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
   // ---- Lifecycle: connect on mount, disconnect on unmount ----
 
   useEffect(() => {
-    if (!config) return
+    reconnectAttempts.current = 0
+    if (!config) {
+      setStatus('disconnected')
+      return
+    }
 
     connect()
     return () => {
       intentionalClose.current = true
       clearReconnectTimer()
-      // Capture the current WebSocket before clearing the ref
-      // so that its onclose handler can detect it's stale.
+      // Invalidate the socket before close so late callbacks cannot affect a new game.
       const currentWs = wsRef.current
-      if (currentWs) {
-        currentWs.close()
-        // Do NOT clear wsRef here — let onclose handle it
-        // via the stale check (wsRef.current === ws).
-        // This prevents a race where the cleanup runs before
-        // the new connect() in StrictMode, but the new connect()
-        // has already set wsRef.current to the new WebSocket.
-      }
+      wsRef.current = null
+      currentWs?.close()
     }
     // Only re-connect when gameId or playerId changes
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -3,27 +3,9 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Eye, ArrowDown, TrendingUp, X, Swords, type LucideIcon } from 'lucide-react'
 import { useGameStore } from '../../stores/gameStore'
 import { useUIStore } from '../../stores/uiStore'
-import type { GameAction, Player, RoundState } from '../../types/game'
+import type { GameAction } from '../../types/game'
+import { getActionCost } from '../../utils/gameView'
 import CompareSelector from './CompareSelector'
-
-// ---- 费用计算 ----
-
-function getCallCost(round: RoundState, player: Player): number {
-  if (player.status === 'active_blind') return round.current_bet
-  if (player.status === 'active_seen') return round.current_bet * 2
-  return 0
-}
-
-function getRaiseCost(round: RoundState, player: Player): number {
-  if (player.status === 'active_blind') return round.current_bet * 2
-  if (player.status === 'active_seen') return round.current_bet * 4
-  return 0
-}
-
-function getCompareCost(round: RoundState, player: Player): number {
-  if (player.status !== 'active_seen') return 0
-  return getCallCost(round, player)
-}
 
 // ---- 操作按钮配置 ----
 
@@ -47,10 +29,11 @@ const ACTION_ACCENT: Record<string, { border: string; bg: string; text: string }
 }
 
 interface ActionPanelProps {
-  onAction: (action: GameAction, target?: string) => void
+  onAction: (action: GameAction, target?: string) => boolean | void
+  disabled?: boolean
 }
 
-export default function ActionPanel({ onAction }: ActionPanelProps) {
+export default function ActionPanel({ onAction, disabled = false }: ActionPanelProps) {
   const availableActions = useGameStore((s) => s.availableActions)
   const currentRound = useGameStore((s) => s.currentRound)
   const getMyPlayer = useGameStore((s) => s.getMyPlayer)
@@ -69,14 +52,15 @@ export default function ActionPanel({ onAction }: ActionPanelProps) {
 
   const executeAction = useCallback(
     (action: GameAction, target?: string) => {
-      if (isProcessing) return
+      if (disabled || isProcessing) return
+      if (target) useUIStore.getState().setCompareTarget(target)
+      if (onAction(action, target) === false) return
       setIsProcessing(true)
       setConfirmAction(null)
       exitCompareMode()
-      onAction(action, target)
       setTimeout(() => setIsProcessing(false), 500)
     },
-    [isProcessing, onAction, exitCompareMode],
+    [disabled, isProcessing, onAction, exitCompareMode],
   )
 
   const handleActionClick = useCallback(
@@ -123,13 +107,13 @@ export default function ActionPanel({ onAction }: ActionPanelProps) {
           buttons.push({ action: 'check_cards', label: '看牌', icon: Eye, hotkey: 'Q' })
           break
         case 'call':
-          buttons.push({ action: 'call', label: '跟注', costLabel: `${getCallCost(currentRound, myPlayer)}`, icon: ArrowDown, hotkey: 'W' })
+          buttons.push({ action: 'call', label: '跟注', costLabel: `${getActionCost('call', currentRound, myPlayer)}`, icon: ArrowDown, hotkey: 'W' })
           break
         case 'raise':
-          buttons.push({ action: 'raise', label: '加注', costLabel: `${getRaiseCost(currentRound, myPlayer)}`, icon: TrendingUp, hotkey: 'E' })
+          buttons.push({ action: 'raise', label: '加注', costLabel: `${getActionCost('raise', currentRound, myPlayer)}`, icon: TrendingUp, hotkey: 'E' })
           break
         case 'compare':
-          buttons.push({ action: 'compare', label: '比牌', costLabel: `${getCompareCost(currentRound, myPlayer)}`, icon: Swords, hotkey: 'R' })
+          buttons.push({ action: 'compare', label: '比牌', costLabel: `${getActionCost('compare', currentRound, myPlayer)}`, icon: Swords, hotkey: 'R' })
           break
         case 'fold':
           buttons.push({ action: 'fold', label: '弃牌', icon: X, needsConfirm: true, hotkey: 'F' })
@@ -143,15 +127,15 @@ export default function ActionPanel({ onAction }: ActionPanelProps) {
     if (myPlayer.status === 'active_blind') {
       buttons.push(
         { action: 'check_cards', label: '看牌', icon: Eye, hotkey: 'Q' },
-        { action: 'call', label: '跟注', costLabel: `${getCallCost(currentRound, myPlayer)}`, icon: ArrowDown, hotkey: 'W' },
-        { action: 'raise', label: '加注', costLabel: `${getRaiseCost(currentRound, myPlayer)}`, icon: TrendingUp, hotkey: 'E' },
+        { action: 'call', label: '跟注', costLabel: `${getActionCost('call', currentRound, myPlayer)}`, icon: ArrowDown, hotkey: 'W' },
+        { action: 'raise', label: '加注', costLabel: `${getActionCost('raise', currentRound, myPlayer)}`, icon: TrendingUp, hotkey: 'E' },
         { action: 'fold', label: '弃牌', icon: X, hotkey: 'F' },
       )
     } else {
       buttons.push(
-        { action: 'call', label: '跟注', costLabel: `${getCallCost(currentRound, myPlayer)}`, icon: ArrowDown, hotkey: 'W' },
-        { action: 'raise', label: '加注', costLabel: `${getRaiseCost(currentRound, myPlayer)}`, icon: TrendingUp, hotkey: 'E' },
-        { action: 'compare', label: '比牌', costLabel: `${getCompareCost(currentRound, myPlayer)}`, icon: Swords, hotkey: 'R' },
+        { action: 'call', label: '跟注', costLabel: `${getActionCost('call', currentRound, myPlayer)}`, icon: ArrowDown, hotkey: 'W' },
+        { action: 'raise', label: '加注', costLabel: `${getActionCost('raise', currentRound, myPlayer)}`, icon: TrendingUp, hotkey: 'E' },
+        { action: 'compare', label: '比牌', costLabel: `${getActionCost('compare', currentRound, myPlayer)}`, icon: Swords, hotkey: 'R' },
         { action: 'fold', label: '弃牌', icon: X, hotkey: 'F' },
       )
     }
@@ -163,14 +147,14 @@ export default function ActionPanel({ onAction }: ActionPanelProps) {
       (p) => p.id !== myPlayerId && p.status !== 'folded' && p.status !== 'compare_lost' && p.status !== 'out',
     )
     return (
-      <div className="p-3">
+      <fieldset disabled={disabled || isProcessing} className="p-3">
         <CompareSelector
           targets={compareTargets}
-          cost={getCompareCost(currentRound, myPlayer)}
+          cost={getActionCost('compare', currentRound, myPlayer)}
           onSelect={handleCompareTarget}
           onCancel={exitCompareMode}
         />
-      </div>
+      </fieldset>
     )
   }
 
@@ -180,7 +164,7 @@ export default function ActionPanel({ onAction }: ActionPanelProps) {
     const isConfirming = confirmAction === btn.action
     const Icon = btn.icon
     const accent = ACTION_ACCENT[btn.action] ?? ACTION_ACCENT.call
-    const isDisabled = !isMyTurn || isProcessing
+    const isDisabled = disabled || !isMyTurn || isProcessing
 
     return (
       <motion.div
@@ -195,7 +179,7 @@ export default function ActionPanel({ onAction }: ActionPanelProps) {
           <div className="flex items-center justify-center gap-1 h-full">
             <button
               onClick={() => executeAction(btn.action)}
-              disabled={isProcessing}
+              disabled={isDisabled}
               className="flex-1 px-2 py-2.5 rounded-lg text-xs font-bold whitespace-nowrap
                 bg-[var(--color-danger)]/20 text-[var(--color-danger)]
                 border border-[var(--color-danger)]/50

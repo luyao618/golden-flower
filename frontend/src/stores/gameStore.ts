@@ -31,6 +31,7 @@ export interface ActionLogEntry {
 }
 import { createGame as apiCreateGame, getAvailableModels } from '../services/api'
 import { useUIStore } from './uiStore'
+import { useSessionStore } from './sessionStore'
 
 // ---- AI 对手配置 (大厅用) ----
 
@@ -46,7 +47,7 @@ interface GameStore {
   gameId: string | null
   players: Player[]
   gameState: GameState | null
-  status: 'idle' | 'creating' | 'playing' | 'finished'
+  status: 'idle' | 'creating' | 'waiting' | 'playing' | 'finished'
   error: string | null
 
   // 牌桌运行时状态
@@ -291,11 +292,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       // 从响应中找到人类玩家的 ID
       const humanPlayer = response.players.find((p) => p.player_type === 'human')
+      if (!humanPlayer?.id || !response.game_id) throw new Error('创建响应缺少游戏或人类玩家身份')
+      useSessionStore.getState().remember(response.game_id, humanPlayer.id)
 
       set({
         gameId: response.game_id,
-        myPlayerId: humanPlayer?.id ?? null,
-        status: 'playing',
+        myPlayerId: humanPlayer.id,
+        status: 'waiting',
       })
 
       return response
@@ -314,7 +317,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       currentRound: state.current_round,
       roundHistory: state.round_history,
       config: state.config,
-      status: state.status === 'finished' ? 'finished' : 'playing',
+      status: state.status,
     }),
 
   reset: () =>
@@ -356,7 +359,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   addRoundResult: (result) =>
     set((state) => ({
-      roundHistory: [...state.roundHistory, result],
+      roundHistory: [...state.roundHistory.filter(
+        existing => existing.round_number !== result.round_number,
+      ), result].sort((a, b) => a.round_number - b.round_number),
     })),
 
   addChatMessage: (message) =>

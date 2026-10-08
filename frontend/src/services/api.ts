@@ -16,6 +16,7 @@ import type {
   CreateGameResponse,
   ExperienceReview,
   GameSummary,
+  GameState,
   OpenRouterAddedModel,
   OpenRouterModel,
   PlayerActionRequest,
@@ -31,6 +32,16 @@ import type {
 import { useProviderKeysStore } from '../stores/settingsStore'
 
 const BASE_URL = '/api'
+
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
 
 // ---- 通用请求方法 ----
 
@@ -55,7 +66,7 @@ async function request<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: response.statusText }))
-    throw new Error(error.detail || `HTTP ${response.status}`)
+    throw new ApiError(error.detail || `HTTP ${response.status}`, response.status)
   }
 
   return response.json()
@@ -72,16 +83,9 @@ export async function createGame(req: CreateGameRequest): Promise<CreateGameResp
 }
 
 /** 获取游戏状态 */
-export async function getGameState(gameId: string, playerId?: string) {
-  const params = playerId ? `?player_id=${playerId}` : ''
-  return request<{
-    game_id: string
-    status: string
-    players: Array<Record<string, unknown>>
-    current_round: Record<string, unknown> | null
-    round_history: Array<Record<string, unknown>>
-    config: Record<string, unknown>
-  }>(`/game/${gameId}${params}`)
+export async function getGameState(gameId: string, playerId?: string, signal?: AbortSignal): Promise<GameState> {
+  const params = playerId ? `?player_id=${encodeURIComponent(playerId)}` : ''
+  return request<GameState>(`/game/${encodeURIComponent(gameId)}${params}`, { signal })
 }
 
 /** 开始游戏（开始第一局） */

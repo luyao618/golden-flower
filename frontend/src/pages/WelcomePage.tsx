@@ -1,20 +1,21 @@
 // ============================================================
-// 欢迎页面 - 游戏入口，三个选项：开始游戏/配置模型/游戏设置
+// 欢迎页面 - 使用真实大厅配置创建游戏
 // ============================================================
 
 import { useState } from 'react'
 import ModelConfigPanel from '../components/Lobby/ModelConfigPanel'
-import GameSetupModal from '../components/Lobby/GameSetupModal'
+import GameConfigForm from '../components/Lobby/GameConfigForm'
+import ChipsConfig from '../components/Lobby/ChipsConfig'
+import StartButton from '../components/Lobby/StartButton'
 import GameSettingsModal from '../components/Lobby/GameSettingsModal'
 import lobbyBg from '../assets/lobby-bg.jpeg'
 
 export default function WelcomePage() {
   const [configOpen, setConfigOpen] = useState(false)
-  const [gameSetupOpen, setGameSetupOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
-    <div className="h-screen bg-[var(--bg-deepest)] flex flex-col items-center p-4 relative overflow-hidden">
+    <div className="min-h-screen bg-[var(--bg-deepest)] flex flex-col items-center p-4 relative">
       {/* 背景图 — object-position 往下偏移，露出机器人和牌桌 */}
       <div className="absolute inset-0 pointer-events-none">
         <img
@@ -36,7 +37,7 @@ export default function WelcomePage() {
       {/* 标题区域 — 放在顶部暗色区域 */}
       <div className="relative z-10 flex flex-col items-center mt-10 mb-4">
         {/* 主标题 — 霓虹灯招牌闪烁风格 */}
-        <h1 className="text-7xl font-black neon-sign-flicker tracking-widest mb-3"
+        <h1 className="text-4xl sm:text-7xl font-black neon-sign-flicker tracking-widest mb-3"
             style={{ fontFamily: 'var(--font-display)' }}>
            大模型炸金花
         </h1>
@@ -51,11 +52,13 @@ export default function WelcomePage() {
         <div className="title-deco-line w-64 rounded-full" />
       </div>
 
-      {/* 中间留白 — 露出背景中机器人 */}
-      <div className="flex-1 min-h-0" />
+      <div className="relative z-10 w-full max-w-xl space-y-4 bg-black/60 rounded-xl p-4 mb-4">
+        <GameConfigForm />
+        <ChipsConfig />
+        <StartButton onNeedModelConfig={() => setConfigOpen(true)} />
+      </div>
 
-      {/* 三个菜单按钮 — 毛玻璃风格 + 多彩霓虹光边框，位于中下方 */}
-      <div className="relative z-10 flex flex-col gap-3 w-full max-w-sm mb-20">
+      <div className="relative z-10 flex flex-col gap-3 w-full max-w-sm mb-8">
         {/* 配置模型 — 紫色霓虹 */}
         <button
           onClick={() => setConfigOpen(true)}
@@ -70,23 +73,6 @@ export default function WelcomePage() {
           <span className="text-xl font-black tracking-[0.25em]"
                 style={{ fontFamily: 'var(--font-display)', color: '#f0e4ff', textShadow: '0 0 10px rgba(139,92,246,0.9), 0 0 30px rgba(139,92,246,0.6), 0 0 60px rgba(139,92,246,0.3)' }}>
             配 置 模 型
-          </span>
-        </button>
-
-        {/* 开始游戏 — 青色霓虹（改为弹窗模式） */}
-        <button
-          onClick={() => setGameSetupOpen(true)}
-          className="welcome-btn py-3.5 flex items-center justify-center gap-3 cursor-pointer active:scale-[0.98]"
-          style={{ background: 'rgba(0, 212, 255, 0.08)' }}
-        >
-          <svg className="w-6 h-6 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-               style={{ color: '#d5fbff', filter: 'drop-shadow(0 0 6px rgba(0,212,255,0.8)) drop-shadow(0 0 14px rgba(0,212,255,0.5))' }}>
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="text-xl font-black tracking-[0.25em]"
-                style={{ fontFamily: 'var(--font-display)', color: '#d5fbff', textShadow: '0 0 10px rgba(0,212,255,0.9), 0 0 30px rgba(0,212,255,0.6), 0 0 60px rgba(0,212,255,0.3)' }}>
-            开 始 游 戏
           </span>
         </button>
 
@@ -114,9 +100,6 @@ export default function WelcomePage() {
 
       {/* 模型配置面板 */}
       <ModelConfigPanel open={configOpen} onClose={() => setConfigOpen(false)} />
-
-      {/* 游戏设置弹窗 */}
-      <GameSetupModal open={gameSetupOpen} onClose={() => setGameSetupOpen(false)} />
 
       {/* 游戏设置（Max Token 等）弹窗 */}
       <GameSettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />

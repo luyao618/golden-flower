@@ -43,7 +43,7 @@ export default function ResultPage() {
 
       try {
         const state = await getGameState(gameId)
-        const loaded = state.players.map((p: Record<string, unknown>) => ({
+        const loaded = state.players.map((p) => ({
           id: p.id as string,
           name: p.name as string,
           avatar: (p.avatar as string) || '',
@@ -55,7 +55,7 @@ export default function ResultPage() {
           model_id: (p.model_id as string) || null,
         }))
         setPlayers(loaded)
-        const config = state.config as Record<string, unknown>
+        const config = state.config
         if (config?.initial_chips) {
           setInitialChips(config.initial_chips as number)
         }

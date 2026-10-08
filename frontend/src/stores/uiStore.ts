@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Card } from '../types/game'
+import type { Card, GameAction } from '../types/game'
 
 // ---- 动画状态 ----
 
@@ -48,7 +48,19 @@ export interface CopilotErrorState {
 
 // ---- UI 状态 ----
 
+export interface PendingCommand {
+  requestId: string
+  kind: 'start_round' | 'player_action'
+  action?: GameAction
+  target?: string
+  roundNumber: number | null
+}
+
 export interface UIState {
+  pendingCommand: PendingCommand | null
+  isGameSynchronized: boolean
+  setPendingCommand: (command: PendingCommand | null) => void
+  setGameSynchronized: (ready: boolean) => void
   // 当前选中/高亮的玩家
   selectedPlayerId: string | null
   // 当前行动玩家 ID（高亮边框）
@@ -124,6 +136,10 @@ export interface UIState {
 }
 
 export const useUIStore = create<UIState>((set) => ({
+  pendingCommand: null,
+  isGameSynchronized: false,
+  setPendingCommand: (pendingCommand) => set({ pendingCommand }),
+  setGameSynchronized: (isGameSynchronized) => set({ isGameSynchronized }),
   // Initial state
   selectedPlayerId: null,
   activePlayerId: null,
@@ -243,6 +259,8 @@ export const useUIStore = create<UIState>((set) => ({
 
   resetUI: () =>
     set({
+      pendingCommand: null,
+      isGameSynchronized: false,
       selectedPlayerId: null,
       activePlayerId: null,
       isCompareMode: false,

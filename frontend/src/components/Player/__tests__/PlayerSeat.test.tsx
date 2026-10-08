@@ -299,3 +299,12 @@ describe('PlayerSeat', () => {
     expect(screen.queryByTestId('chat-bubble')).toBeNull()
   })
 })
+
+it('shows server-revealed showdown cards even when settlement eliminated the player', () => {
+  useUIStore.setState({ showPlayerCards: true, compareRevealedCards: { p1: [
+    { suit: 'hearts', rank: 14 }, { suit: 'spades', rank: 13 }, { suit: 'clubs', rank: 12 },
+  ] } })
+  render(<PlayerSeat player={makePlayer({ status: 'out', chips: 0 })} {...defaultProps} />)
+  expect(screen.getByTestId('card-hand')).toHaveAttribute('data-face-up', 'true')
+  expect(screen.getByTestId('card-hand')).toHaveTextContent('3 cards')
+})

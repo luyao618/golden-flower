@@ -119,7 +119,6 @@ export default function TableLayout({ className = '', onCheckCards }: TableLayou
     isCompareMode,
     stopDealingAnimation,
     setShowPlayerCards,
-    setHasLookedAtCards,
     winAnimation,
     clearWinAnimation,
   } = useUIStore()
@@ -140,7 +139,7 @@ export default function TableLayout({ className = '', onCheckCards }: TableLayou
   }, [chatMessages])
 
   // 当前行动玩家
-  const currentPlayerIndex = currentRound?.current_player_index ?? -1
+  const currentPlayerIndex = currentRound?.phase === 'betting' ? currentRound.current_player_index : -1
   const currentPlayerId = players[currentPlayerIndex]?.id ?? null
 
   // 庄家
@@ -170,11 +169,10 @@ export default function TableLayout({ className = '', onCheckCards }: TableLayou
     setShowPlayerCards(true)
   }, [stopDealingAnimation, setShowPlayerCards])
 
-  // 看牌回调 — 翻转手牌并发送看牌操作到后端
+  // 看牌回调 — 仅发送请求，收到服务端确认后才翻牌
   const handleLookAtCards = useCallback(() => {
-    setHasLookedAtCards(true)
     onCheckCards?.()
-  }, [setHasLookedAtCards, onCheckCards])
+  }, [onCheckCards])
 
   // 赢家动画完成回调
   const handleWinAnimationComplete = useCallback(() => {

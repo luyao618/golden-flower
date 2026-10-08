@@ -566,3 +566,16 @@ describe('setProviderConfig', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/providers/azure_openai/config')
   })
 })
+
+it('preserves HTTP status for honest missing-game recovery', async () => {
+  fetchMock.mockResolvedValue(errorResponse(404, '游戏不存在'))
+  await expect(getGameState('missing', 'p1')).rejects.toMatchObject({ status: 404, message: '游戏不存在' })
+})
+
+it('encodes viewer identity and forwards request cancellation', async () => {
+  fetchMock.mockResolvedValue(okResponse({}))
+  const controller = new AbortController()
+  await getGameState('game/id', 'player+id', controller.signal)
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/game/game%2Fid?player_id=player%2Bid')
+  expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal)
+})
