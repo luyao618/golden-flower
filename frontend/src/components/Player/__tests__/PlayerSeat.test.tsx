@@ -22,10 +22,8 @@ import type { Player, Card } from '../../../types/game'
 vi.mock('framer-motion', () => ({
   motion: {
     div: ({ children, ...props }: Record<string, unknown>) => {
-      const {
-        layout: _l, initial: _i, animate: _a, exit: _e, transition: _t,
-        whileHover: _wh, whileTap: _wt, ...rest
-      } = props
+      const rest = Object.fromEntries(Object.entries(props).filter(([key]) =>
+        !['layout', 'initial', 'animate', 'exit', 'transition', 'whileHover', 'whileTap'].includes(key)))
       return <div {...rest}>{children as React.ReactNode}</div>
     },
   },
@@ -298,4 +296,13 @@ describe('PlayerSeat', () => {
     render(<PlayerSeat player={makePlayer()} {...defaultProps} />)
     expect(screen.queryByTestId('chat-bubble')).toBeNull()
   })
+})
+
+it('shows server-revealed showdown cards even when settlement eliminated the player', () => {
+  useUIStore.setState({ showPlayerCards: true, compareRevealedCards: { p1: [
+    { suit: 'hearts', rank: 14 }, { suit: 'spades', rank: 13 }, { suit: 'clubs', rank: 12 },
+  ] } })
+  render(<PlayerSeat player={makePlayer({ status: 'out', chips: 0 })} {...defaultProps} />)
+  expect(screen.getByTestId('card-hand')).toHaveAttribute('data-face-up', 'true')
+  expect(screen.getByTestId('card-hand')).toHaveTextContent('3 cards')
 })

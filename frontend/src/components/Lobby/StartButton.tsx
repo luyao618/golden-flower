@@ -21,6 +21,7 @@ export default function StartButton({ onNeedModelConfig }: StartButtonProps) {
   const isCreating = status === 'creating'
 
   const handleStart = async () => {
+    if (useGameStore.getState().status === 'creating') return
     setLocalError(null)
 
     // 基础验证

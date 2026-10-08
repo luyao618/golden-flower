@@ -89,8 +89,8 @@ export default function PlayerSeat({
 
   // 比牌亮牌：是否该玩家的手牌在比牌后被揭示
   const revealedCards = compareRevealedCards[player.id] ?? null
-  // 弃牌的玩家（比牌输家）也要亮牌，只要有 revealed 数据
-  const shouldShowRevealed = revealedCards !== null && showPlayerCards && !isOut
+  // 比牌输家和结算出局玩家也显示服务端明确揭示的牌
+  const shouldShowRevealed = revealedCards !== null && showPlayerCards
 
   // 角色图片加载状态
   const [charLoaded, setCharLoaded] = useState(false)

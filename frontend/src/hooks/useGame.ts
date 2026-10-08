@@ -6,9 +6,10 @@
 // 提供客户端操作方法（发送玩家操作、聊天、开始新局）。
 // ============================================================
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useGameStore } from '../stores/gameStore'
 import { useUIStore } from '../stores/uiStore'
+import { canPeek, canStartHand } from '../utils/gameView'
 import { useWebSocket, type ConnectionStatus } from './useWebSocket'
 import type {
   Card,
@@ -21,7 +22,7 @@ import type {
 
 // ---- 服务端事件 data 类型 ----
 
-interface GameStateData extends GameState {}
+type GameStateData = GameState
 
 interface RoundStartedData {
   round_number: number
@@ -60,7 +61,7 @@ interface ChatMessageData {
   timestamp: number
 }
 
-interface RoundEndedData extends RoundResult {}
+type RoundEndedData = RoundResult
 
 interface GameEndedData {
   final_standings: Array<{
@@ -104,12 +105,13 @@ interface UseGameConfig {
 export interface UseGameReturn {
   /** WebSocket 连接状态 */
   connectionStatus: ConnectionStatus
+  terminalCloseCode: number | null
   /** 发送玩家操作 */
-  sendAction: (action: GameAction, target?: string) => void
+  sendAction: (action: GameAction, target?: string) => boolean
   /** 发送聊天消息 */
-  sendChatMessage: (content: string) => void
+  sendChatMessage: (content: string) => boolean
   /** 发送开始新局 */
-  sendStartRound: () => void
+  sendStartRound: () => boolean
   /** 手动断开 */
   disconnect: () => void
   /** 手动重连 */
@@ -120,6 +122,9 @@ export interface UseGameReturn {
 
 export function useGame(config: UseGameConfig | null): UseGameReturn {
   const { gameId = '', playerId = '' } = config ?? {}
+  const settlementEffects = useRef(new Set<string>())
+  const pendingCommand = useUIStore(s => s.pendingCommand)
+  const setPendingCommand = useUIStore(s => s.setPendingCommand)
 
   // Store actions（从 store 中获取稳定的 action 引用）
   const setGameState = useGameStore((s) => s.setGameState)
@@ -153,40 +158,50 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
         // ---- game_state: 完整游戏状态（连接时收到）----
         case 'game_state': {
           const data = event.data as GameStateData
-          setGameState(data)
+          if (data.game_id !== gameId) break
+          const wasSynchronized = useUIStore.getState().isGameSynchronized
+          const previousRound = useGameStore.getState().currentRound?.round_number
+          const round = data.current_round
+          const pending = useUIStore.getState().pendingCommand
+          useUIStore.getState().setGameSynchronized(true)
+          if (!wasSynchronized || (pending && (
+            round?.round_number !== pending.roundNumber ||
+            (pending.kind === 'player_action' && (round?.phase !== 'betting' ||
+              (pending.action !== 'check_cards' && data.players[round.current_player_index]?.id !== playerId)))
+          ))) setPendingCommand(null)
+          if (previousRound !== round?.round_number) clearCompareRevealedCards()
+          const revealed = data.round_history.find(result => result.round_number === round?.round_number)?.hands_revealed
+          if (revealed) setCompareRevealedCards(revealed)
           setMyPlayerId(playerId)
+          setGameState(data)
 
-          // 如果玩家有手牌（重连场景）
           const me = data.players?.find((p) => p.id === playerId)
-          if (me?.hand) {
-            setMyCards(me.hand)
+          setMyCards(me?.hand ?? [])
+          setHasLookedAtCards(me?.status === 'active_seen')
+          if (!useUIStore.getState().dealingAnimation.isDealing) {
+            setShowPlayerCards(Boolean(data.current_round))
           }
 
-          // 如果当前轮到我
-          if (data.current_round) {
-            const currentPlayer = data.players?.[data.current_round.current_player_index]
-            if (currentPlayer) {
-              setActivePlayer(currentPlayer.id)
-            }
-            // 如果不是我的回合，清空可用操作（防止 stale actions）
-            if (currentPlayer?.id !== playerId) {
-              setAvailableActions([])
-            }
-          }
+          const currentPlayer = round?.phase === 'betting' && data.status === 'playing'
+            ? data.players[round.current_player_index] : undefined
+          setActivePlayer(currentPlayer?.id ?? null)
+          if (currentPlayer?.id !== playerId || !wasSynchronized) setAvailableActions([])
           break
         }
 
         // ---- game_started: 游戏开始 ----
         case 'game_started': {
           const data = event.data as GameStateData
-          setGameState(data)
           setMyPlayerId(playerId)
+          setGameState(data)
           break
         }
 
         // ---- round_started: 新一局开始 ----
         case 'round_started': {
           const data = event.data as RoundStartedData
+          setPendingCommand(null)
+          useUIStore.getState().setGameSynchronized(false)
           // 清空上一局的状态
           setMyCards([])
           setAvailableActions([])
@@ -231,6 +246,10 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
         // ---- turn_changed: 轮到某个玩家行动 ----
         case 'turn_changed': {
           const data = event.data as TurnChangedData
+          const pending = useUIStore.getState().pendingCommand
+          if (pending?.kind === 'player_action' && pending.action !== 'check_cards' && data.current_player_id !== playerId) {
+            setPendingCommand(null)
+          }
           setActivePlayer(data.current_player_id)
           setThinkingPlayer(null) // 清除 AI 思考状态
 
@@ -250,6 +269,8 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
 
           // 如果是自己的操作
           if (data.player_id === playerId) {
+            const pending = useUIStore.getState().pendingCommand
+            if (pending?.kind === 'player_action' && pending.action === data.action) setPendingCommand(null)
             // 如果是看牌操作，自动翻转手牌显示正面
             // 看牌不消耗回合，不清空可用操作列表（等待 turn_changed 更新）
             if (data.action === 'check_cards') {
@@ -317,41 +338,29 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
         // ---- round_ended: 本局结束 ----
         case 'round_ended': {
           const data = event.data as RoundEndedData
+          const effectId = `${gameId}:${data.round_number}`
+          const alreadyReceived = settlementEffects.current.has(effectId)
+          settlementEffects.current.add(effectId)
           addRoundResult(data)
+          setPendingCommand(null)
+          if (data.hands_revealed) setCompareRevealedCards(data.hands_revealed)
           setAvailableActions([])
           setActivePlayer(null)
           setThinkingPlayer(null)
           setReviewingPlayer(null)
 
-          // 应用筹码变化，更新玩家筹码显示
-          if (data.player_chip_changes) {
-            const store = useGameStore.getState()
-            for (const [pid, chipChange] of Object.entries(data.player_chip_changes)) {
-              const player = store.getPlayerById(pid)
-              if (player) {
-                store.updatePlayer(pid, { chips: player.chips + chipChange })
-              }
-            }
-          }
-
           // 触发赢家筹码飞行动画（底池 → 赢家）
-          if (data.winner_id && data.pot > 0) {
+          if (!alreadyReceived && data.winner_id && data.pot > 0) {
             startWinAnimation(data.winner_id, data.pot)
           }
 
-          // 延迟清理 round 状态，让赢家动画有时间播放
-          setTimeout(() => {
-            setCurrentRound(null)
-            setShowPlayerCards(false)
-            setHasLookedAtCards(false)
-            clearCompareRevealedCards()
-          }, 1500)
           break
         }
 
         // ---- game_ended: 整场游戏结束 ----
         case 'game_ended': {
           const data = event.data as GameEndedData
+          setPendingCommand(null)
           setAvailableActions([])
           setActivePlayer(null)
           setThinkingPlayer(null)
@@ -364,7 +373,10 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
           }
 
           // 设置游戏状态为完成
-          useGameStore.setState({ status: 'finished' })
+          useGameStore.setState({
+            status: 'finished',
+            gameState: store.gameState ? { ...store.gameState, status: 'finished', players: useGameStore.getState().players } : null,
+          })
           break
         }
 
@@ -386,6 +398,7 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
         // ---- error: 错误消息 ----
         case 'error': {
           const data = event.data as ErrorData
+          setPendingCommand(null)
           console.error('[Game] Server error:', data.message)
           // 弹出错误弹窗，让用户清楚看到出了什么问题
           pushErrorPopup({
@@ -425,6 +438,7 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
     [
       playerId,
       gameId,
+      setPendingCommand,
       setGameState,
       setMyPlayerId,
       setMyCards,
@@ -448,6 +462,12 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
     ],
   )
 
+  const invalidateConnection = useCallback(() => {
+    useUIStore.getState().setGameSynchronized(false)
+    useUIStore.getState().setPendingCommand(null)
+    useGameStore.getState().setAvailableActions([])
+  }, [])
+
   // ---- WebSocket config (only when we have both IDs) ----
 
   const wsConfig = useMemo(
@@ -458,27 +478,95 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
             playerId,
             onMessage: handleServerEvent,
             onConnected: () => {
-              console.log('[Game] WebSocket connected')
+              invalidateConnection()
             },
             onDisconnected: () => {
-              console.log('[Game] WebSocket disconnected')
+              invalidateConnection()
             },
             onError: (error: string) => {
               console.error('[Game] WebSocket error:', error)
             },
           }
         : null,
-    [config, gameId, playerId, handleServerEvent],
+    [config, gameId, playerId, handleServerEvent, invalidateConnection],
   )
 
-  const ws = useWebSocket(wsConfig)
+  const { status: connectionStatus, terminalCloseCode, sendAction: transportAction, sendChatMessage: transportChat,
+    sendStartRound: transportStart, disconnect, reconnect: transportReconnect } = useWebSocket(wsConfig)
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected') invalidateConnection()
+  }, [connectionStatus, invalidateConnection])
+
+  useEffect(() => invalidateConnection, [gameId, playerId, invalidateConnection])
+
+  const reportFailedSend = useCallback(() => {
+    useUIStore.getState().setPendingCommand(null)
+    pushErrorPopup({ message: '连接不可用，操作未发送，请重连后重试', source: '连接中断' })
+    return false
+  }, [pushErrorPopup])
+
+  const sendAction = useCallback((action: GameAction, target?: string): boolean => {
+    const ui = useUIStore.getState()
+    const store = useGameStore.getState()
+    if (connectionStatus !== 'connected' || !ui.isGameSynchronized) return reportFailedSend()
+    if (ui.pendingCommand || store.gameId !== gameId) return false
+    const me = store.players.find(player => player.id === playerId)
+    const game = store.gameState
+    if (!game || game.status !== 'playing' || game.current_round?.phase !== 'betting') return false
+    if (action === 'check_cards') {
+      if (!canPeek(game, me)) return false
+    } else if (!store.availableActions.includes(action) || game.players[game.current_round.current_player_index]?.id !== playerId) {
+      return false
+    }
+    if (action === 'compare' && (!target || target === playerId || !store.players.some(player =>
+      player.id === target && ['active_blind', 'active_seen'].includes(player.status)))) return false
+    ui.setPendingCommand({ requestId: crypto.randomUUID(), kind: 'player_action', action, target,
+      roundNumber: store.currentRound?.round_number ?? null })
+    if (!transportAction(action, target)) return reportFailedSend()
+    return true
+  }, [connectionStatus, transportAction, gameId, playerId, reportFailedSend])
+
+  const sendStartRound = useCallback((): boolean => {
+    const ui = useUIStore.getState()
+    const store = useGameStore.getState()
+    if (connectionStatus !== 'connected' || !ui.isGameSynchronized) return reportFailedSend()
+    if (ui.pendingCommand || store.gameId !== gameId || !canStartHand(store.gameState)) return false
+    ui.setPendingCommand({ requestId: crypto.randomUUID(), kind: 'start_round',
+      roundNumber: store.currentRound?.round_number ?? null })
+    if (!transportStart()) return reportFailedSend()
+    return true
+  }, [connectionStatus, transportStart, gameId, reportFailedSend])
+
+  const sendChatMessage = useCallback((content: string): boolean => {
+    if (connectionStatus !== 'connected' || !transportChat(content)) {
+      pushErrorPopup({ message: '连接不可用，消息未发送，请重连后重试', source: '连接中断' })
+      return false
+    }
+    return true
+  }, [connectionStatus, transportChat, pushErrorPopup])
+
+  const reconnect = useCallback(() => {
+    invalidateConnection()
+    transportReconnect()
+  }, [invalidateConnection, transportReconnect])
+
+  useEffect(() => {
+    if (!pendingCommand) return
+    const timer = setTimeout(() => {
+      pushErrorPopup({ message: '等待服务器确认，正在重连同步状态；不会自动重发操作', source: '操作待确认' })
+      reconnect()
+    }, 15000)
+    return () => clearTimeout(timer)
+  }, [pendingCommand, reconnect, pushErrorPopup])
 
   return {
-    connectionStatus: ws.status,
-    sendAction: ws.sendAction,
-    sendChatMessage: ws.sendChatMessage,
-    sendStartRound: ws.sendStartRound,
-    disconnect: ws.disconnect,
-    reconnect: ws.reconnect,
+    connectionStatus: connectionStatus,
+    terminalCloseCode,
+    sendAction,
+    sendChatMessage,
+    sendStartRound,
+    disconnect: disconnect,
+    reconnect,
   }
 }

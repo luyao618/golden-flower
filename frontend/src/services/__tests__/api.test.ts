@@ -164,7 +164,7 @@ describe('game management', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/game/create')
   })
 
-  it('getGameState GETs with optional player_id', async () => {
+  it('getGameState GETs with required player_id', async () => {
     fetchMock.mockResolvedValue(
       okResponse({ game_id: 'g1', status: 'playing', players: [], current_round: null, round_history: [], config: {} }),
     )
@@ -172,12 +172,10 @@ describe('game management', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/game/g1?player_id=p1')
   })
 
-  it('getGameState without player_id', async () => {
-    fetchMock.mockResolvedValue(
-      okResponse({ game_id: 'g1', status: 'playing', players: [], current_round: null, round_history: [], config: {} }),
-    )
-    await getGameState('g1')
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/game/g1')
+  it('rejects a missing viewer before making a request', async () => {
+    await expect(getGameState('g1', '')).rejects.toThrow('缺少玩家身份')
+    await expect(getGameState('g1', '   ')).rejects.toThrow('缺少玩家身份')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('startGame POSTs', async () => {
@@ -565,4 +563,17 @@ describe('setProviderConfig', () => {
     expect(res.provider).toBe('azure_openai')
     expect(fetchMock.mock.calls[0][0]).toBe('/api/providers/azure_openai/config')
   })
+})
+
+it('preserves HTTP status for honest missing-game recovery', async () => {
+  fetchMock.mockResolvedValue(errorResponse(404, '游戏不存在'))
+  await expect(getGameState('missing', 'p1')).rejects.toMatchObject({ status: 404, message: '游戏不存在' })
+})
+
+it('encodes viewer identity and forwards request cancellation', async () => {
+  fetchMock.mockResolvedValue(okResponse({}))
+  const controller = new AbortController()
+  await getGameState('game/id', 'player+id', controller.signal)
+  expect(fetchMock.mock.calls[0][0]).toBe('/api/game/game%2Fid?player_id=player%2Bid')
+  expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal)
 })

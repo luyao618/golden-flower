@@ -112,15 +112,23 @@ class WebSocketManager:
         await websocket.accept()
         if game_id not in self._connections:
             self._connections[game_id] = {}
+        previous = self._connections[game_id].get(player_id)
         self._connections[game_id][player_id] = websocket
+        if previous is not None and previous is not websocket:
+            try:
+                await previous.close(code=4001, reason="Connection replaced")
+            except Exception:
+                logger.debug("Replaced WebSocket already closed: game=%s, player=%s", game_id, player_id)
         logger.info("WebSocket connected: game=%s, player=%s", game_id, player_id)
 
-    def disconnect(self, game_id: str, player_id: str) -> None:
-        """断开连接并清理"""
-        if game_id in self._connections:
-            self._connections[game_id].pop(player_id, None)
-            if not self._connections[game_id]:
-                del self._connections[game_id]
+    def disconnect(self, game_id: str, player_id: str, websocket: WebSocket) -> None:
+        """仅清理当前连接，避免旧连接退出时删除重连后的新连接。"""
+        connections = self._connections.get(game_id)
+        if connections is None or connections.get(player_id) is not websocket:
+            return
+        del connections[player_id]
+        if not connections:
+            del self._connections[game_id]
         logger.info("WebSocket disconnected: game=%s, player=%s", game_id, player_id)
 
     def get_connections(self, game_id: str) -> dict[str, WebSocket]:
@@ -1346,7 +1354,7 @@ async def websocket_endpoint(
     websocket: WebSocket,
     game_id: str,
     player_id: str | None = None,
-):
+) -> None:
     """WebSocket 连接端点
 
     连接方式: ws://localhost:8000/ws/{game_id}?player_id={player_id}
@@ -1370,18 +1378,21 @@ async def websocket_endpoint(
         player_id = websocket.query_params.get("player_id")
 
     if not player_id:
+        await websocket.accept()
         await websocket.close(code=4001, reason="Missing player_id")
         return
 
     # 验证游戏存在
     game = store.get(game_id)
     if game is None:
+        await websocket.accept()
         await websocket.close(code=4004, reason=f"Game {game_id} not found")
         return
 
     # 验证玩家属于该游戏
     player = game.get_player_by_id(player_id)
     if player is None:
+        await websocket.accept()
         await websocket.close(code=4003, reason=f"Player {player_id} not in game {game_id}")
         return
 
@@ -1434,6 +1445,8 @@ async def websocket_endpoint(
         # 消息处理循环
         while True:
             data = await websocket.receive_json()
+            if ws_manager.get_connections(game_id).get(player_id) is not websocket:
+                break
             event_type = data.get("type", "")
 
             if event_type == "player_action":
@@ -1490,7 +1503,7 @@ async def websocket_endpoint(
             e,
         )
     finally:
-        ws_manager.disconnect(game_id, player_id)
+        ws_manager.disconnect(game_id, player_id, websocket)
 
 
 # ---- Client Event Handlers ----

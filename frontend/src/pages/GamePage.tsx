@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MessageCircle, ChevronUp, ArrowLeft, BookOpen, LogOut, Trophy } from 'lucide-react'
 import TableLayout from '../components/Table/TableLayout'
@@ -9,175 +9,13 @@ import ChatInput from '../components/Table/ChatInput'
 import { ThoughtDrawer } from '../components/Thought'
 import CopilotErrorModal from '../components/CopilotErrorModal'
 import { useGameStore } from '../stores/gameStore'
-import type { ActionLogEntry } from '../stores/gameStore'
 import { useUIStore } from '../stores/uiStore'
 import { useGame } from '../hooks/useGame'
+import { useGameSession } from '../hooks/useGameSession'
+import { canStartHand } from '../utils/gameView'
 import type { ConnectionStatus } from '../hooks/useWebSocket'
-import type { Player, RoundState, GameConfig, Card } from '../types/game'
 import gameBg from '../assets/game-bg.jpg'
 import { CHARACTER_IMAGES } from '../utils/theme'
-
-// ============================================================
-// DEV MOCK — 仅开发模式下填充假数据以预览 UI
-// ============================================================
-
-const DEV_MOCK_ENABLED = import.meta.env.DEV
-
-const MOCK_PLAYERS: Player[] = [
-  {
-    id: 'human-1',
-    name: '玩家',
-    avatar: '🧑',
-    player_type: 'human',
-    chips: 850,
-    status: 'active_seen',
-    hand: [
-      { suit: 'hearts', rank: 14 },
-      { suit: 'spades', rank: 13 },
-      { suit: 'diamonds', rank: 12 },
-    ],
-    total_bet_this_round: 40,
-    model_id: null,
-  },
-  {
-    id: 'ai-1',
-    name: 'GPT-4o',
-    avatar: '🤖',
-    player_type: 'ai',
-    chips: 1120,
-    status: 'active_blind',
-    hand: null,
-    total_bet_this_round: 20,
-    model_id: 'openai-gpt4o',
-  },
-  {
-    id: 'ai-2',
-    name: 'Claude',
-    avatar: '🤖',
-    player_type: 'ai',
-    chips: 980,
-    status: 'active_seen',
-    hand: null,
-    total_bet_this_round: 40,
-    model_id: 'anthropic-claude',
-  },
-  {
-    id: 'ai-3',
-    name: 'Gemini',
-    avatar: '🤖',
-    player_type: 'ai',
-    chips: 650,
-    status: 'folded',
-    hand: null,
-    total_bet_this_round: 10,
-    model_id: 'google-gemini',
-  },
-]
-
-const MOCK_ROUND: RoundState = {
-  round_number: 3,
-  pot: 110,
-  current_bet: 40,
-  dealer_index: 1,
-  current_player_index: 0,
-  actions: [
-    { player_id: 'ai-1', player_name: 'GPT-4o', action: 'call', amount: 20, target_id: null, timestamp: Date.now() / 1000 - 30 },
-    { player_id: 'ai-2', player_name: 'Claude', action: 'raise', amount: 40, target_id: null, timestamp: Date.now() / 1000 - 20 },
-    { player_id: 'ai-3', player_name: 'Gemini', action: 'fold', amount: 0, target_id: null, timestamp: Date.now() / 1000 - 10 },
-  ],
-  phase: 'betting',
-  turn_count: 4,
-  max_turns: 10,
-}
-
-const MOCK_CONFIG: GameConfig = {
-  initial_chips: 1000,
-  ante: 10,
-  max_bet: 200,
-  max_turns: 10,
-}
-
-const MOCK_MY_CARDS: Card[] = [
-  { suit: 'hearts', rank: 14 },
-  { suit: 'spades', rank: 13 },
-  { suit: 'diamonds', rank: 12 },
-]
-
-const MOCK_ACTION_LOG: Omit<ActionLogEntry, 'timestamp'>[] = [
-  { player_id: 'ai-1', player_name: 'GPT-4o', action: 'call', amount: 20, compare_result: null },
-  { player_id: 'ai-2', player_name: 'Claude', action: 'raise', amount: 40, compare_result: null },
-  { player_id: 'ai-3', player_name: 'Gemini', action: 'fold', amount: 0, compare_result: null },
-]
-
-function useDevMock() {
-  const injected = useRef(false)
-  const gameId = useGameStore((s) => s.gameId)
-
-  useEffect(() => {
-    if (!DEV_MOCK_ENABLED || injected.current || gameId) return
-
-    const store = useGameStore.getState()
-    useGameStore.setState({
-      gameId: 'dev-mock-game-001',
-      myPlayerId: 'human-1',
-      players: MOCK_PLAYERS,
-      status: 'playing',
-      currentRound: MOCK_ROUND,
-      config: MOCK_CONFIG,
-      myCards: MOCK_MY_CARDS,
-      availableActions: ['fold', 'call', 'raise', 'compare'],
-      chatMessages: [
-        {
-          id: 'chat-1',
-          game_id: 'dev-mock-game-001',
-          round_number: 3,
-          player_id: 'ai-1',
-          player_name: 'GPT-4o',
-          message_type: 'action_talk',
-          content: '我跟了',
-          timestamp: Date.now() / 1000 - 25,
-        },
-        {
-          id: 'chat-2',
-          game_id: 'dev-mock-game-001',
-          round_number: 3,
-          player_id: 'ai-2',
-          player_name: 'Claude',
-          message_type: 'action_talk',
-          content: '加注！',
-          timestamp: Date.now() / 1000 - 15,
-        },
-      ],
-      roundHistory: [
-        {
-          round_number: 1,
-          winner_id: 'human-1',
-          winner_name: '玩家',
-          pot: 60,
-          win_method: 'all_folded',
-          hands_revealed: null,
-          player_chip_changes: { 'human-1': 40, 'ai-1': -20, 'ai-2': -10, 'ai-3': -10 },
-        },
-        {
-          round_number: 2,
-          winner_id: 'ai-2',
-          winner_name: 'Claude',
-          pot: 120,
-          win_method: 'compare',
-          hands_revealed: null,
-          player_chip_changes: { 'human-1': -40, 'ai-1': -40, 'ai-2': 80, 'ai-3': 0 },
-        },
-      ],
-    })
-
-    for (const entry of MOCK_ACTION_LOG) {
-      store.addActionLog(entry)
-    }
-
-    injected.current = true
-    console.log('[DEV MOCK] 已注入模拟游戏数据')
-  }, [gameId])
-}
 
 /**
  * 连接状态指示器
@@ -188,12 +26,14 @@ function ConnectionIndicator({ status }: { status: ConnectionStatus }) {
     connecting: 'bg-[var(--color-warning)] animate-pulse',
     reconnecting: 'bg-[var(--color-warning)] animate-pulse',
     disconnected: 'bg-[var(--color-danger)]',
+    terminal: 'bg-[var(--color-danger)]',
   }
   const labelMap: Record<ConnectionStatus, string> = {
     connected: '已连接',
     connecting: '连接中...',
     reconnecting: '重连中...',
     disconnected: '已断开',
+    terminal: '会话不可用',
   }
 
   return (
@@ -306,8 +146,6 @@ function StatusBar() {
 }
 
 export default function GamePage() {
-  useDevMock()
-
   // 预加载角色立绘图片
   useEffect(() => {
     CHARACTER_IMAGES.forEach((src) => {
@@ -318,30 +156,31 @@ export default function GamePage() {
 
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const gameId = useGameStore((s) => s.gameId)
-  const myPlayerId = useGameStore((s) => s.myPlayerId)
-  const players = useGameStore((s) => s.players)
+  const gameState = useGameStore((s) => s.gameState)
   const status = useGameStore((s) => s.status)
   const currentRound = useGameStore((s) => s.currentRound)
-  const roundHistory = useGameStore((s) => s.roundHistory)
   const chatMessages = useGameStore((s) => s.chatMessages)
   const reset = useGameStore((s) => s.reset)
   const resetUI = useUIStore((s) => s.resetUI)
+  const pendingCommand = useUIStore(s => s.pendingCommand)
+  const isGameSynchronized = useUIStore(s => s.isGameSynchronized)
   const isChatPanelExpanded = useUIStore((s) => s.isChatPanelExpanded)
   const toggleChatPanel = useUIStore((s) => s.toggleChatPanel)
   const toggleThoughtDrawer = useUIStore((s) => s.toggleThoughtDrawer)
 
-  const effectiveGameId = id ?? gameId ?? ''
+  const effectiveGameId = id ?? ''
+  const session = useGameSession(effectiveGameId)
+  const myPlayerId = session.playerId
 
   const gameConfig = useMemo(
     () =>
-      effectiveGameId && myPlayerId
+      session.status === 'ready' && effectiveGameId && myPlayerId
         ? { gameId: effectiveGameId, playerId: myPlayerId }
         : null,
-    [effectiveGameId, myPlayerId],
+    [effectiveGameId, myPlayerId, session.status],
   )
 
-  const { connectionStatus, sendAction, sendStartRound, sendChatMessage, disconnect } = useGame(gameConfig)
+  const { connectionStatus, terminalCloseCode, sendAction, sendStartRound, sendChatMessage, disconnect, reconnect } = useGame(gameConfig)
 
   useEffect(() => {
     return () => {
@@ -362,18 +201,20 @@ export default function GamePage() {
     navigate('/')
   }
 
-  const canStartRound =
-    connectionStatus === 'connected' &&
-    players.length > 0 &&
-    status === 'playing' &&
-    !currentRound
+  const canStartRound = canStartHand(gameState)
+  const commandsDisabled = connectionStatus !== 'connected' || !isGameSynchronized || Boolean(pendingCommand)
 
-  if (!myPlayerId) {
+  const terminalError = terminalCloseCode === 4004
+    ? '游戏已不存在，请返回大厅创建新游戏'
+    : '玩家身份已失效，请返回大厅创建新游戏'
+
+  if (session.status !== 'ready' || connectionStatus === 'terminal') {
     return (
       <div className="h-screen bg-[var(--bg-deepest)] flex items-center justify-center">
         <div className="text-center space-y-4">
-          <div className="inline-block w-8 h-8 border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)] rounded-full animate-spin" />
-          <p className="text-[var(--color-primary)] text-sm">正在加载游戏...</p>
+          {session.status === 'loading' && <div className="inline-block w-8 h-8 border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)] rounded-full animate-spin" />}
+          <p className="text-[var(--color-primary)] text-sm">{connectionStatus === 'terminal' ? terminalError : session.status === 'loading' ? '正在加载游戏...' : session.error}</p>
+          {connectionStatus !== 'terminal' && session.status === 'error' && <button onClick={session.retry}>重试</button>}
           <button
             onClick={handleBackToLobby}
             className="text-[var(--text-muted)] hover:text-[var(--color-primary)] text-xs underline cursor-pointer"
@@ -521,28 +362,24 @@ export default function GamePage() {
                   <ChevronUp className="w-3.5 h-3.5 text-[var(--color-secondary)]/40 group-hover:text-[var(--color-secondary)]/70 transition-colors" />
                 </motion.div>
               </button>
-              <AnimatePresence initial={false}>
-                {isChatPanelExpanded && (
-                  <motion.div
-                    key="chat-panel-content"
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-                    className="overflow-hidden border-t border-white/[0.04]"
-                  >
-                    <ChatPanel
-                      messages={chatMessages}
-                      className="h-72 py-1"
-                    />
-                    <ChatInput
-                      onSend={sendChatMessage}
-                      disabled={connectionStatus !== 'connected'}
-                      placeholder={connectionStatus !== 'connected' ? '未连接...' : '说点什么...'}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <motion.div
+                key="chat-panel-content"
+                initial={false}
+                animate={{ height: isChatPanelExpanded ? 'auto' : 0, opacity: isChatPanelExpanded ? 1 : 0 }}
+                inert={!isChatPanelExpanded}
+                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                className={`overflow-hidden ${isChatPanelExpanded ? 'border-t border-white/[0.04]' : ''}`}
+              >
+                <ChatPanel
+                  messages={chatMessages}
+                  className="h-72 py-1"
+                />
+                <ChatInput
+                  onSend={sendChatMessage}
+                  disabled={connectionStatus !== 'connected'}
+                  placeholder={connectionStatus !== 'connected' ? '未连接...' : '说点什么...'}
+                />
+              </motion.div>
             </div>
           </div>
 
@@ -553,10 +390,11 @@ export default function GamePage() {
                 <div className="p-3">
                   <button
                     onClick={sendStartRound}
+                    disabled={commandsDisabled}
                     className="relative w-full px-4 py-2.5 font-bold rounded-lg transition-all cursor-pointer text-sm text-[var(--text-primary)] bg-black/30 border border-[var(--color-primary)]/40 hover:border-[var(--color-primary)]/70 hover:shadow-[0_0_15px_rgba(0,212,255,0.3)]"
                     style={{ fontFamily: 'var(--font-display)' }}
                   >
-                    {roundHistory.length === 0 ? '开始第一局' : '开始下一局'}
+                    {currentRound ? '开始下一局' : '开始第一局'}
                   </button>
                 </div>
               )}
@@ -566,11 +404,13 @@ export default function GamePage() {
                 </div>
               )}
               {!canStartRound && status === 'playing' && currentRound && (
-                <ActionPanel onAction={sendAction} />
+                <ActionPanel onAction={sendAction} disabled={commandsDisabled} />
               )}
+              {pendingCommand && <div role="status" className="p-3 text-center text-sm">等待服务器确认…</div>}
               {connectionStatus === 'disconnected' && status !== 'finished' && (
                 <div className="p-3 text-center">
                   <span className="text-[var(--color-danger)] text-sm">连接已断开</span>
+                  <button onClick={reconnect} className="ml-2 underline">重连</button>
                 </div>
               )}
               {(connectionStatus === 'connecting' || connectionStatus === 'reconnecting') && (

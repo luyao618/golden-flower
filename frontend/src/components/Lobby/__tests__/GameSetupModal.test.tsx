@@ -26,7 +26,8 @@ vi.mock('react-router-dom', () => ({
 vi.mock('framer-motion', () => ({
   motion: {
     div: ({ children, ...props }: Record<string, unknown>) => {
-      const { initial: _i, animate: _a, exit: _e, transition: _t, whileHover: _wh, whileTap: _wt, ...rest } = props
+      const rest = Object.fromEntries(Object.entries(props).filter(([key]) =>
+        !['layout', 'initial', 'animate', 'exit', 'transition', 'whileHover', 'whileTap'].includes(key)))
       return <div {...rest}>{children as React.ReactNode}</div>
     },
   },
@@ -49,10 +50,13 @@ vi.mock('../ModelConfigPanel', () => ({
     ) : null,
 }))
 
+const realCreateGame = useGameStore.getState().createGame
+
 // ---- Helpers ----
 
 beforeEach(() => {
   useGameStore.getState().reset()
+  useGameStore.setState({ createGame: realCreateGame })
   mockNavigate.mockClear()
 })
 
@@ -140,9 +144,8 @@ describe('GameSetupModal', () => {
     })
 
     // Mock createGame to succeed
-    const originalCreateGame = useGameStore.getState().createGame
     useGameStore.setState({
-      createGame: vi.fn().mockResolvedValue({ game_id: 'game-123' }) as unknown as typeof originalCreateGame,
+      createGame: vi.fn().mockResolvedValue({ game_id: 'game-123' }),
     })
 
     render(<GameSetupModal open={true} onClose={vi.fn()} />)
@@ -162,9 +165,8 @@ describe('GameSetupModal', () => {
       playerName: '玩家',
     })
 
-    const originalCreateGame = useGameStore.getState().createGame
     useGameStore.setState({
-      createGame: vi.fn().mockRejectedValue(new Error('服务器错误')) as unknown as typeof originalCreateGame,
+      createGame: vi.fn().mockRejectedValue(new Error('服务器错误')),
     })
 
     render(<GameSetupModal open={true} onClose={vi.fn()} />)
@@ -184,9 +186,8 @@ describe('GameSetupModal', () => {
       playerName: '  ',
     })
 
-    const originalCreateGame = useGameStore.getState().createGame
     useGameStore.setState({
-      createGame: vi.fn().mockResolvedValue({ game_id: 'g1' }) as unknown as typeof originalCreateGame,
+      createGame: vi.fn().mockResolvedValue({ game_id: 'g1' }),
     })
 
     render(<GameSetupModal open={true} onClose={vi.fn()} />)
@@ -210,4 +211,20 @@ describe('GameSetupModal', () => {
     expect(startBtn).toBeTruthy()
     expect(startBtn!.hasAttribute('disabled')).toBe(true)
   })
+})
+
+it('still remembers the real human identity through the retained legacy modal', async () => {
+  const { useSessionStore } = await import('../../../stores/sessionStore')
+  useSessionStore.setState({ sessions: {} })
+  useGameStore.setState({ playerName: 'Legacy player', aiOpponents: [{ model_id: 'm1', name: 'AI' }],
+    availableModels: [{ id: 'm1', display_name: 'Model', model: 'model', provider: 'openrouter' }] })
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({
+    game_id: 'modal-game', players: [{ id: 'modal-human', player_type: 'human' }],
+  }) }))
+  try {
+    render(<GameSetupModal open onClose={vi.fn()} />)
+    fireEvent.click(screen.getByText('开始游戏'))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/game/modal-game'))
+    expect(useSessionStore.getState().sessions['modal-game']).toEqual({ playerId: 'modal-human' })
+  } finally { vi.unstubAllGlobals() }
 })

@@ -9,7 +9,7 @@ import { useState, useCallback, useRef, type KeyboardEvent } from 'react'
 
 interface ChatInputProps {
   /** 发送消息的回调 */
-  onSend: (content: string) => void
+  onSend: (content: string) => boolean | void
   /** 是否禁用（如未连接时） */
   disabled?: boolean
   /** 占位符文本 */
@@ -32,7 +32,7 @@ export default function ChatInput({
     const trimmed = text.trim()
     if (!trimmed || disabled) return
 
-    onSend(trimmed)
+    if (onSend(trimmed) === false) return
     setText('')
     inputRef.current?.focus()
   }, [text, disabled, onSend])
