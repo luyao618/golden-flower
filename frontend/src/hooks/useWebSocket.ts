@@ -14,7 +14,7 @@ import { useProviderKeysStore } from '../stores/settingsStore'
 
 // ---- 连接状态 ----
 
-export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting'
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'terminal'
 
 // ---- 配置 ----
 
@@ -42,6 +42,7 @@ interface WebSocketConfig {
 interface UseWebSocketReturn {
   /** 当前连接状态 */
   status: ConnectionStatus
+  terminalCloseCode: number | null
   /** 发送玩家操作 */
   sendAction: (action: GameAction, target?: string) => boolean
   /** 发送聊天消息 */
@@ -92,6 +93,8 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
   } = config ?? {}
 
   const [status, setStatus] = useState<ConnectionStatus>('disconnected')
+  const [terminalCloseCode, setTerminalCloseCode] = useState<number | null>(null)
+  const terminalSession = useRef<{ gameId: string; playerId: string } | null>(null)
 
   // Refs for mutable state that shouldn't trigger re-renders
   const wsRef = useRef<WebSocket | null>(null)
@@ -120,6 +123,7 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
   // ---- Internal: connect ----
   const connect = useCallback(() => {
     if (!gameId || !playerId) return
+    if (terminalSession.current?.gameId === gameId && terminalSession.current.playerId === playerId) return
     clearReconnectTimer()
 
     // Close existing connection if any
@@ -165,7 +169,16 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
       if (wsRef.current !== ws) return
       wsRef.current = null
 
-      if (intentionalClose.current || TERMINAL_CLOSE_CODES.has(event.code)) {
+      if (TERMINAL_CLOSE_CODES.has(event.code)) {
+        clearReconnectTimer()
+        terminalSession.current = { gameId, playerId }
+        setTerminalCloseCode(event.code)
+        setStatus('terminal')
+        onDisconnectedRef.current?.()
+        return
+      }
+
+      if (intentionalClose.current) {
         setStatus('disconnected')
         onDisconnectedRef.current?.()
         return
@@ -244,7 +257,7 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
       wsRef.current = null
       currentWs.close()
     }
-    setStatus('disconnected')
+    setStatus(terminalSession.current ? 'terminal' : 'disconnected')
   }, [clearReconnectTimer])
 
   // ---- Reconnect ----
@@ -258,6 +271,8 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
 
   useEffect(() => {
     reconnectAttempts.current = 0
+    terminalSession.current = null
+    setTerminalCloseCode(null)
     if (!config) {
       setStatus('disconnected')
       return
@@ -278,6 +293,7 @@ export function useWebSocket(config: WebSocketConfig | null): UseWebSocketReturn
 
   return {
     status,
+    terminalCloseCode,
     sendAction,
     sendChatMessage,
     sendStartRound,

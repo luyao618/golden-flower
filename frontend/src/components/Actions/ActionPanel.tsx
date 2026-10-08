@@ -45,22 +45,20 @@ export default function ActionPanel({ onAction, disabled = false }: ActionPanelP
   const exitCompareMode = useUIStore((s) => s.exitCompareMode)
 
   const [confirmAction, setConfirmAction] = useState<GameAction | null>(null)
-  const [isProcessing, setIsProcessing] = useState(false)
+  const isProcessing = useUIStore(s => Boolean(s.pendingCommand))
 
   const myPlayer = getMyPlayer()
   const isMyTurn = availableActions.length > 0
 
   const executeAction = useCallback(
     (action: GameAction, target?: string) => {
-      if (disabled || isProcessing) return
+      if (disabled || useUIStore.getState().pendingCommand) return
       if (target) useUIStore.getState().setCompareTarget(target)
       if (onAction(action, target) === false) return
-      setIsProcessing(true)
       setConfirmAction(null)
       exitCompareMode()
-      setTimeout(() => setIsProcessing(false), 500)
     },
-    [disabled, isProcessing, onAction, exitCompareMode],
+    [disabled, onAction, exitCompareMode],
   )
 
   const handleActionClick = useCallback(

@@ -105,6 +105,7 @@ interface UseGameConfig {
 export interface UseGameReturn {
   /** WebSocket 连接状态 */
   connectionStatus: ConnectionStatus
+  terminalCloseCode: number | null
   /** 发送玩家操作 */
   sendAction: (action: GameAction, target?: string) => boolean
   /** 发送聊天消息 */
@@ -490,7 +491,7 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
     [config, gameId, playerId, handleServerEvent, invalidateConnection],
   )
 
-  const { status: connectionStatus, sendAction: transportAction, sendChatMessage: transportChat,
+  const { status: connectionStatus, terminalCloseCode, sendAction: transportAction, sendChatMessage: transportChat,
     sendStartRound: transportStart, disconnect, reconnect: transportReconnect } = useWebSocket(wsConfig)
 
   useEffect(() => {
@@ -561,6 +562,7 @@ export function useGame(config: UseGameConfig | null): UseGameReturn {
 
   return {
     connectionStatus: connectionStatus,
+    terminalCloseCode,
     sendAction,
     sendChatMessage,
     sendStartRound,

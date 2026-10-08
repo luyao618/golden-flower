@@ -5,8 +5,9 @@ import { useGameStore } from '../stores/gameStore'
 import Leaderboard from '../components/Settlement/Leaderboard'
 import type { LeaderboardPlayer } from '../components/Settlement/Leaderboard'
 import AgentSummaryCard from '../components/Settlement/AgentSummaryCard'
-import { getExperienceReviews, getGameState } from '../services/api'
-import type { ExperienceReview, Player } from '../types/game'
+import { getExperienceReviews } from '../services/api'
+import { useGameSession } from '../hooks/useGameSession'
+import type { ExperienceReview } from '../types/game'
 import resultBg from '../assets/result-bg.png'
 
 export default function ResultPage() {
@@ -14,60 +15,13 @@ export default function ResultPage() {
   const navigate = useNavigate()
   const gameId = id ?? ''
 
-  // 从 store 获取状态（如果有的话）
-  const storePlayers = useGameStore((s) => s.players)
-  const storeConfig = useGameStore((s) => s.config)
+  const session = useGameSession(gameId)
+  const players = useGameStore((s) => s.players)
+  const initialChips = useGameStore((s) => s.config?.initial_chips ?? 1000)
   const reset = useGameStore((s) => s.reset)
-
-  // 本地状态
-  const [players, setPlayers] = useState<Player[]>(storePlayers)
-  const [initialChips, setInitialChips] = useState(storeConfig?.initial_chips ?? 1000)
   const [reviews, setReviews] = useState<Record<string, ExperienceReview[]>>({})
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>({})
-  const [pageLoading, setPageLoading] = useState(true)
-
-  // 如果 store 中没有 players 数据（例如直接访问 URL），从 API 加载
-  useEffect(() => {
-    async function loadGameData() {
-      if (storePlayers.length > 0) {
-        setPlayers(storePlayers)
-        setInitialChips(storeConfig?.initial_chips ?? 1000)
-        setPageLoading(false)
-        return
-      }
-
-      if (!gameId) {
-        setPageLoading(false)
-        return
-      }
-
-      try {
-        const state = await getGameState(gameId)
-        const loaded = state.players.map((p) => ({
-          id: p.id as string,
-          name: p.name as string,
-          avatar: (p.avatar as string) || '',
-          player_type: p.player_type as 'human' | 'ai',
-          chips: p.chips as number,
-          status: p.status as Player['status'],
-          hand: null,
-          total_bet_this_round: 0,
-          model_id: (p.model_id as string) || null,
-        }))
-        setPlayers(loaded)
-        const config = state.config
-        if (config?.initial_chips) {
-          setInitialChips(config.initial_chips as number)
-        }
-      } catch (err) {
-        console.error('Failed to load game state:', err)
-      } finally {
-        setPageLoading(false)
-      }
-    }
-
-    loadGameData()
-  }, [gameId, storePlayers, storeConfig])
+  const pageLoading = session.status === 'loading'
 
   // AI 玩家列表
   const aiPlayers = useMemo(
@@ -88,7 +42,7 @@ export default function ResultPage() {
 
   // 加载所有 AI 的 reviews（策略调整记录）
   const loadReviews = useCallback(async () => {
-    if (!gameId || aiPlayers.length === 0) return
+    if (session.status !== 'ready' || !gameId || aiPlayers.length === 0) return
 
     const loadingMap: Record<string, boolean> = {}
     aiPlayers.forEach((ai) => { loadingMap[ai.id] = true })
@@ -107,13 +61,11 @@ export default function ResultPage() {
         }
       }),
     )
-  }, [gameId, aiPlayers])
+  }, [gameId, aiPlayers, session.status])
 
   useEffect(() => {
-    if (!pageLoading && aiPlayers.length > 0) {
-      loadReviews()
-    }
-  }, [pageLoading, aiPlayers.length]) // eslint-disable-line react-hooks/exhaustive-deps
+    void loadReviews()
+  }, [loadReviews])
 
   // 返回大厅
   const handleBackToLobby = () => {
@@ -145,7 +97,7 @@ export default function ResultPage() {
   }
 
   // 没有数据
-  if (players.length === 0) {
+  if (session.status !== 'ready' || players.length === 0) {
     return (
       <div className="min-h-screen bg-[var(--bg-deepest)] flex items-center justify-center relative overflow-hidden">
         {/* 背景图 */}
@@ -159,7 +111,7 @@ export default function ResultPage() {
           }}
         />
         <div className="text-center space-y-4 relative z-10">
-          <p className="text-[var(--text-muted)]">未找到游戏数据</p>
+          <p className="text-[var(--text-muted)]">{session.error ?? '未找到游戏数据'}</p>
           <div className="neon-btn-wrapper inline-block">
             <button
               onClick={handleBackToLobby}

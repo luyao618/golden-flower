@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import pytest_asyncio
 from starlette.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.agents.agent_manager import AgentManager, get_agent_manager
 from app.agents.base_agent import BaseAgent, Decision, ThoughtData
@@ -155,7 +156,7 @@ class TestWebSocketManager:
         assert "player-1" in conns
         assert conns["player-1"] is mock_ws
 
-        ws_manager.disconnect("game-1", "player-1")
+        ws_manager.disconnect("game-1", "player-1", mock_ws)
         assert ws_manager.active_game_count == 0
         assert ws_manager.get_connections("game-1") == {}
 
@@ -170,7 +171,7 @@ class TestWebSocketManager:
         conns = ws_manager.get_connections("game-1")
         assert len(conns) == 2
 
-        ws_manager.disconnect("game-1", "p1")
+        ws_manager.disconnect("game-1", "p1", ws1)
         assert len(ws_manager.get_connections("game-1")) == 1
 
     @pytest.mark.asyncio
@@ -262,7 +263,7 @@ class TestWebSocketManager:
     @pytest.mark.asyncio
     async def test_disconnect_nonexistent(self, ws_manager):
         """断开不存在的连接不报错"""
-        ws_manager.disconnect("no-game", "no-player")
+        ws_manager.disconnect("no-game", "no-player", AsyncMock())
         # 不抛异常即可
 
 
@@ -383,9 +384,10 @@ class TestWebSocketEndpoint:
         client = TestClient(test_app)
         game = self._create_game_in_store(test_app)
 
-        with pytest.raises(Exception):
-            with client.websocket_connect(f"/ws/{game.game_id}"):
-                pass
+        with pytest.raises(WebSocketDisconnect) as closed:
+            with client.websocket_connect(f"/ws/{game.game_id}") as ws:
+                ws.receive_json()
+        assert closed.value.code == 4001
         reset_game_store()
         reset_ws_manager()
 
@@ -393,9 +395,10 @@ class TestWebSocketEndpoint:
         """连接不存在的游戏应关闭连接"""
         client = TestClient(test_app)
 
-        with pytest.raises(Exception):
-            with client.websocket_connect("/ws/no-such-game?player_id=p1"):
-                pass
+        with pytest.raises(WebSocketDisconnect) as closed:
+            with client.websocket_connect("/ws/no-such-game?player_id=p1") as ws:
+                ws.receive_json()
+        assert closed.value.code == 4004
         reset_game_store()
         reset_ws_manager()
 
@@ -404,9 +407,12 @@ class TestWebSocketEndpoint:
         client = TestClient(test_app)
         game = self._create_game_in_store(test_app)
 
-        with pytest.raises(Exception):
-            with client.websocket_connect(f"/ws/{game.game_id}?player_id=invalid-player"):
-                pass
+        with pytest.raises(WebSocketDisconnect) as closed:
+            with client.websocket_connect(
+                f"/ws/{game.game_id}?player_id=invalid-player"
+            ) as ws:
+                ws.receive_json()
+        assert closed.value.code == 4003
         reset_game_store()
         reset_ws_manager()
 

@@ -22,10 +22,8 @@ import type { Player, Card } from '../../../types/game'
 vi.mock('framer-motion', () => ({
   motion: {
     div: ({ children, ...props }: Record<string, unknown>) => {
-      const {
-        layout: _l, initial: _i, animate: _a, exit: _e, transition: _t,
-        whileHover: _wh, whileTap: _wt, ...rest
-      } = props
+      const rest = Object.fromEntries(Object.entries(props).filter(([key]) =>
+        !['layout', 'initial', 'animate', 'exit', 'transition', 'whileHover', 'whileTap'].includes(key)))
       return <div {...rest}>{children as React.ReactNode}</div>
     },
   },

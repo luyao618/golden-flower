@@ -26,12 +26,14 @@ function ConnectionIndicator({ status }: { status: ConnectionStatus }) {
     connecting: 'bg-[var(--color-warning)] animate-pulse',
     reconnecting: 'bg-[var(--color-warning)] animate-pulse',
     disconnected: 'bg-[var(--color-danger)]',
+    terminal: 'bg-[var(--color-danger)]',
   }
   const labelMap: Record<ConnectionStatus, string> = {
     connected: '已连接',
     connecting: '连接中...',
     reconnecting: '重连中...',
     disconnected: '已断开',
+    terminal: '会话不可用',
   }
 
   return (
@@ -178,7 +180,7 @@ export default function GamePage() {
     [effectiveGameId, myPlayerId, session.status],
   )
 
-  const { connectionStatus, sendAction, sendStartRound, sendChatMessage, disconnect, reconnect } = useGame(gameConfig)
+  const { connectionStatus, terminalCloseCode, sendAction, sendStartRound, sendChatMessage, disconnect, reconnect } = useGame(gameConfig)
 
   useEffect(() => {
     return () => {
@@ -202,13 +204,17 @@ export default function GamePage() {
   const canStartRound = canStartHand(gameState)
   const commandsDisabled = connectionStatus !== 'connected' || !isGameSynchronized || Boolean(pendingCommand)
 
-  if (session.status !== 'ready') {
+  const terminalError = terminalCloseCode === 4004
+    ? '游戏已不存在，请返回大厅创建新游戏'
+    : '玩家身份已失效，请返回大厅创建新游戏'
+
+  if (session.status !== 'ready' || connectionStatus === 'terminal') {
     return (
       <div className="h-screen bg-[var(--bg-deepest)] flex items-center justify-center">
         <div className="text-center space-y-4">
           {session.status === 'loading' && <div className="inline-block w-8 h-8 border-2 border-[var(--color-primary)]/30 border-t-[var(--color-primary)] rounded-full animate-spin" />}
-          <p className="text-[var(--color-primary)] text-sm">{session.status === 'loading' ? '正在加载游戏...' : session.error}</p>
-          {session.status === 'error' && <button onClick={session.retry}>重试</button>}
+          <p className="text-[var(--color-primary)] text-sm">{connectionStatus === 'terminal' ? terminalError : session.status === 'loading' ? '正在加载游戏...' : session.error}</p>
+          {connectionStatus !== 'terminal' && session.status === 'error' && <button onClick={session.retry}>重试</button>}
           <button
             onClick={handleBackToLobby}
             className="text-[var(--text-muted)] hover:text-[var(--color-primary)] text-xs underline cursor-pointer"
@@ -356,28 +362,24 @@ export default function GamePage() {
                   <ChevronUp className="w-3.5 h-3.5 text-[var(--color-secondary)]/40 group-hover:text-[var(--color-secondary)]/70 transition-colors" />
                 </motion.div>
               </button>
-              <AnimatePresence initial={false}>
-                {isChatPanelExpanded && (
-                  <motion.div
-                    key="chat-panel-content"
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-                    className="overflow-hidden border-t border-white/[0.04]"
-                  >
-                    <ChatPanel
-                      messages={chatMessages}
-                      className="h-72 py-1"
-                    />
-                    <ChatInput
-                      onSend={sendChatMessage}
-                      disabled={connectionStatus !== 'connected'}
-                      placeholder={connectionStatus !== 'connected' ? '未连接...' : '说点什么...'}
-                    />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <motion.div
+                key="chat-panel-content"
+                initial={false}
+                animate={{ height: isChatPanelExpanded ? 'auto' : 0, opacity: isChatPanelExpanded ? 1 : 0 }}
+                inert={!isChatPanelExpanded}
+                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                className={`overflow-hidden ${isChatPanelExpanded ? 'border-t border-white/[0.04]' : ''}`}
+              >
+                <ChatPanel
+                  messages={chatMessages}
+                  className="h-72 py-1"
+                />
+                <ChatInput
+                  onSend={sendChatMessage}
+                  disabled={connectionStatus !== 'connected'}
+                  placeholder={connectionStatus !== 'connected' ? '未连接...' : '说点什么...'}
+                />
+              </motion.div>
             </div>
           </div>
 

@@ -9,7 +9,7 @@ import type { GameState, ServerEvent } from '../../types/game'
 
 // Leave session/API/game hooks real; replace only the socket and animation-heavy children.
 const transport = vi.hoisted(() => ({
-  status: 'connected', sendAction: vi.fn(() => true), sendChatMessage: vi.fn(() => true),
+  status: 'connected', terminalCloseCode: null as number | null, sendAction: vi.fn(() => true), sendChatMessage: vi.fn(() => true),
   sendStartRound: vi.fn(() => true), disconnect: vi.fn(), reconnect: vi.fn(),
   config: null as null | { gameId: string; playerId: string; onMessage: (event: ServerEvent) => void },
 }))
@@ -18,6 +18,7 @@ vi.mock('../../hooks/useWebSocket', () => ({ useWebSocket: (config: typeof trans
   return { ...transport, status: config ? transport.status : 'disconnected' }
 } }))
 vi.mock('../../components/Table/TableLayout', () => ({ default: () => <div>Real table</div> }))
+vi.mock('../../components/Table/ChatPanel', () => ({ default: () => null }))
 vi.mock('../../components/Thought', () => ({ ThoughtDrawer: () => null }))
 vi.mock('../../components/CopilotErrorModal', () => ({ default: () => null }))
 const fetchMock = vi.fn()
@@ -36,11 +37,16 @@ beforeEach(() => {
   useSessionStore.setState({ sessions: {} })
   transport.config = null
   transport.status = 'connected'
+  transport.terminalCloseCode = null
+  transport.sendChatMessage.mockReturnValue(true)
   vi.clearAllMocks()
   fetchMock.mockReset()
   vi.stubGlobal('fetch', fetchMock)
 })
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.useRealTimers()
+})
 function Navigation() {
   const navigate = useNavigate()
   return <button onClick={() => navigate('/game/g2')}>Switch route</button>
@@ -137,4 +143,65 @@ it('disables buttons for a pending start until server acknowledgement', async ()
   fireEvent.click(screen.getByRole('button', { name: '开始第一局' }))
   expect(screen.getByRole('button', { name: '开始第一局' })).toBeDisabled()
   expect(screen.getByText('等待服务器确认…')).toBeInTheDocument()
+})
+
+
+it.each([100, 1000])('unlocks a peek only on acknowledgement after %s ms', async (delay) => {
+  useSessionStore.getState().remember('g1', 'p1')
+  const blind = { ...snapshot, players: snapshot.players.map(p => ({ ...p, status: 'active_blind' as const, hand: null })) }
+  fetchMock.mockResolvedValue(ok(blind))
+  openGame()
+  await screen.findByText('Real table')
+  act(() => transport.config!.onMessage({ type: 'game_state', data: blind }))
+  act(() => transport.config!.onMessage({ type: 'turn_changed', data: { current_player_id: 'p1', available_actions: ['check_cards', 'call'] } }))
+  vi.useFakeTimers()
+  fireEvent.click(screen.getByRole('button', { name: /看牌/ }))
+  act(() => vi.advanceTimersByTime(delay))
+  expect(screen.getByRole('button', { name: /跟注/ })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: /跟注/ }))
+  expect(transport.sendAction).toHaveBeenCalledTimes(1)
+  act(() => transport.config!.onMessage({ type: 'player_acted', data: { player_id: 'p1', action: 'check_cards', amount: 0 } }))
+  expect(screen.getByRole('button', { name: /跟注/ })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: /跟注/ }))
+  expect(transport.sendAction).toHaveBeenLastCalledWith('call', undefined)
+  expect(transport.sendAction).toHaveBeenCalledTimes(2)
+})
+
+it.each([4001, 4003, 4004])('offers only lobby recovery for terminal WS %s', async (code) => {
+  useSessionStore.getState().remember('g1', 'p1')
+  fetchMock.mockResolvedValue(ok(snapshot))
+  openGame()
+  await screen.findByText('Real table')
+  transport.status = 'terminal'
+  transport.terminalCloseCode = code
+  act(() => transport.config!.onMessage({ type: 'game_state', data: snapshot }))
+  expect(screen.getByText(/请返回大厅创建新游戏/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /重试|重连/ })).not.toBeInTheDocument()
+  expect(screen.queryByText('Real table')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '返回大厅' }))
+  expect(screen.getByText('Home')).toBeInTheDocument()
+  expect(transport.reconnect).not.toHaveBeenCalled()
+})
+
+it('preserves the draft through collapse and failed send, clearing it after success', async () => {
+  useSessionStore.getState().remember('g1', 'p1')
+  fetchMock.mockResolvedValue(ok(snapshot))
+  openGame()
+  await screen.findByText('Real table')
+  const toggle = screen.getByRole('button', { name: '牌桌聊天' })
+  if (!useUIStore.getState().isChatPanelExpanded) fireEvent.click(toggle)
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'unsent draft' } })
+  fireEvent.click(toggle)
+  // Wait longer than the exit animation that used to unmount ChatInput.
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)) })
+  fireEvent.click(toggle)
+  expect(screen.getByRole('textbox')).toHaveValue('unsent draft')
+  transport.sendChatMessage.mockReturnValueOnce(false)
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  fireEvent.click(toggle)
+  fireEvent.click(toggle)
+  expect(screen.getByRole('textbox')).toHaveValue('unsent draft')
+  fireEvent.click(screen.getByRole('button', { name: '发送' }))
+  expect(transport.sendChatMessage).toHaveBeenLastCalledWith('unsent draft')
+  expect(screen.getByRole('textbox')).toHaveValue('')
 })

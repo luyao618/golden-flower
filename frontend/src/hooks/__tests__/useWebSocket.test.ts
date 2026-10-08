@@ -399,18 +399,28 @@ describe('useWebSocket', () => {
     expect(onError).toHaveBeenCalledWith(expect.stringContaining('重连失败'))
   })
 
-  it.each([4001, 4003, 4004])('does not automatically retry terminal close %s', (code) => {
+  it.each([4001, 4003, 4004])('blocks automatic and manual retry for terminal close %s', (code) => {
     const onDisconnected = vi.fn()
-    const { result } = renderHook(() => useWebSocket(makeConfig({ onDisconnected })))
+    const config = makeConfig({ onDisconnected })
+    const { result, rerender } = renderHook(current => useWebSocket(current), { initialProps: config })
     act(() => lastWs().simulateClose(code))
 
-    expect(result.current.status).toBe('disconnected')
+    expect(result.current.status).toBe('terminal')
+    expect(result.current.terminalCloseCode).toBe(code)
     expect(onDisconnected).toHaveBeenCalledOnce()
     act(() => vi.advanceTimersByTime(60000))
-    expect(MockWebSocket.instances).toHaveLength(1)
-
     act(() => result.current.reconnect())
+    act(() => result.current.disconnect())
+    act(() => result.current.reconnect())
+    rerender({ ...config })
+    expect(MockWebSocket.instances).toHaveLength(1)
+    expect(result.current.status).toBe('terminal')
+    expect(result.current.sendAction('call')).toBe(false)
+
+    // A newly created game has its own identity and can connect normally.
+    rerender({ ...config, gameId: 'new-game', playerId: 'new-player' })
     expect(MockWebSocket.instances).toHaveLength(2)
+    expect(result.current.terminalCloseCode).toBeNull()
     act(() => lastWs().simulateOpen())
     expect(result.current.status).toBe('connected')
   })

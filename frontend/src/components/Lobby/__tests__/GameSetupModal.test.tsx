@@ -26,7 +26,8 @@ vi.mock('react-router-dom', () => ({
 vi.mock('framer-motion', () => ({
   motion: {
     div: ({ children, ...props }: Record<string, unknown>) => {
-      const { initial: _i, animate: _a, exit: _e, transition: _t, whileHover: _wh, whileTap: _wt, ...rest } = props
+      const rest = Object.fromEntries(Object.entries(props).filter(([key]) =>
+        !['layout', 'initial', 'animate', 'exit', 'transition', 'whileHover', 'whileTap'].includes(key)))
       return <div {...rest}>{children as React.ReactNode}</div>
     },
   },
@@ -143,9 +144,8 @@ describe('GameSetupModal', () => {
     })
 
     // Mock createGame to succeed
-    const originalCreateGame = useGameStore.getState().createGame
     useGameStore.setState({
-      createGame: vi.fn().mockResolvedValue({ game_id: 'game-123' }) as unknown as typeof originalCreateGame,
+      createGame: vi.fn().mockResolvedValue({ game_id: 'game-123' }),
     })
 
     render(<GameSetupModal open={true} onClose={vi.fn()} />)
@@ -165,9 +165,8 @@ describe('GameSetupModal', () => {
       playerName: '玩家',
     })
 
-    const originalCreateGame = useGameStore.getState().createGame
     useGameStore.setState({
-      createGame: vi.fn().mockRejectedValue(new Error('服务器错误')) as unknown as typeof originalCreateGame,
+      createGame: vi.fn().mockRejectedValue(new Error('服务器错误')),
     })
 
     render(<GameSetupModal open={true} onClose={vi.fn()} />)
@@ -187,9 +186,8 @@ describe('GameSetupModal', () => {
       playerName: '  ',
     })
 
-    const originalCreateGame = useGameStore.getState().createGame
     useGameStore.setState({
-      createGame: vi.fn().mockResolvedValue({ game_id: 'g1' }) as unknown as typeof originalCreateGame,
+      createGame: vi.fn().mockResolvedValue({ game_id: 'g1' }),
     })
 
     render(<GameSetupModal open={true} onClose={vi.fn()} />)

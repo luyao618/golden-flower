@@ -83,8 +83,9 @@ export async function createGame(req: CreateGameRequest): Promise<CreateGameResp
 }
 
 /** 获取游戏状态 */
-export async function getGameState(gameId: string, playerId?: string, signal?: AbortSignal): Promise<GameState> {
-  const params = playerId ? `?player_id=${encodeURIComponent(playerId)}` : ''
+export async function getGameState(gameId: string, playerId: string, signal?: AbortSignal): Promise<GameState> {
+  if (!playerId.trim()) throw new Error('缺少玩家身份，请返回大厅创建游戏')
+  const params = `?player_id=${encodeURIComponent(playerId)}`
   return request<GameState>(`/game/${encodeURIComponent(gameId)}${params}`, { signal })
 }
 

@@ -164,7 +164,7 @@ describe('game management', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/game/create')
   })
 
-  it('getGameState GETs with optional player_id', async () => {
+  it('getGameState GETs with required player_id', async () => {
     fetchMock.mockResolvedValue(
       okResponse({ game_id: 'g1', status: 'playing', players: [], current_round: null, round_history: [], config: {} }),
     )
@@ -172,12 +172,10 @@ describe('game management', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/game/g1?player_id=p1')
   })
 
-  it('getGameState without player_id', async () => {
-    fetchMock.mockResolvedValue(
-      okResponse({ game_id: 'g1', status: 'playing', players: [], current_round: null, round_history: [], config: {} }),
-    )
-    await getGameState('g1')
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/game/g1')
+  it('rejects a missing viewer before making a request', async () => {
+    await expect(getGameState('g1', '')).rejects.toThrow('缺少玩家身份')
+    await expect(getGameState('g1', '   ')).rejects.toThrow('缺少玩家身份')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('startGame POSTs', async () => {
